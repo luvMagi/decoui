@@ -62,6 +62,7 @@ class MainWindow(QMainWindow):
 
         # Sidebar
         sidebar = QWidget(splitter)
+        sidebar.setObjectName("sidebar")
         sidebar_layout = QVBoxLayout(sidebar)
         sidebar_layout.setContentsMargins(0, 0, 0, 0)
 
@@ -110,12 +111,17 @@ class MainWindow(QMainWindow):
             )
             instance = self._get_instance(cls)
             page = ToolPage(tool_info, instance, self._stack)
+            page.history_requested.connect(self._show_history_for_tool)
             self._stack.addWidget(page)
             self._tool_pages[tid] = page
         self._stack.setCurrentWidget(self._tool_pages[tid])
 
     def _show_history(self):
         self._history_page.refresh()
+        self._stack.setCurrentWidget(self._history_page)
+
+    def _show_history_for_tool(self, tool_id: str):
+        self._history_page.show_for_tool(tool_id)
         self._stack.setCurrentWidget(self._history_page)
 
     def _replay(self, tool_id: str, param_map: dict):

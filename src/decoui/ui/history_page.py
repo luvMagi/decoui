@@ -10,10 +10,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QLineEdit,
-    QMainWindow,
     QMenu,
-    QPlainTextEdit,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -23,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from ..storage.db import delete_records, query_logs, query_params, query_records
 from ..storage.models import ExecutionRecord
+from .log_window import LogWindow
 
 _COL_CHECK = 0
 _COL_TIME  = 1
@@ -125,8 +123,16 @@ class HistoryPage(QWidget):
         layout.addWidget(self._detail)
 
         self._selected_record: ExecutionRecord | None = None
+        self._open_log_windows: list = []
 
     # ── Refresh ───────────────────────────────────────────────────────────────
+
+    def show_for_tool(self, tool_id: str):
+        for i in range(self._tool_filter.count()):
+            if self._tool_filter.itemData(i) == tool_id:
+                self._tool_filter.setCurrentIndex(i)
+                return
+        self.refresh()
 
     def refresh(self):
         tool_id = self._tool_filter.currentData()
@@ -236,8 +242,9 @@ class HistoryPage(QWidget):
         if not self._selected_record:
             return
         logs = query_logs(self._selected_record.id)
-        dlg = _LogWindow(self._selected_record.tool_label, logs)
+        dlg = LogWindow(self._selected_record.tool_label, logs)
         dlg.show()
+        self._open_log_windows.append(dlg)
 
     def _context_menu(self, pos):
         rows = list({idx.row() for idx in self._table.selectedIndexes()})
@@ -254,104 +261,3 @@ class HistoryPage(QWidget):
         self.refresh()
 
 
-_ALL_LEVELS = ["stdout", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
-
-
-class _LogWindow(QMainWindow):
-    """Independent resizable log viewer window."""
-
-    def __init__(self, title: str, logs):
-        super().__init__(parent=None)
-        self.setWindowTitle(f"Log — {title}")
-        self.resize(800, 560)
-        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-
-        self._logs = logs
-        self._active_levels: set[str] = set(_ALL_LEVELS)
-
-        central = QWidget(self)
-        self.setCentralWidget(central)
-        layout = QVBoxLayout(central)
-        layout.setContentsMargins(8, 8, 8, 8)
-
-        # ── Level filter buttons ──────────────────────────────────────────────
-        level_row = QHBoxLayout()
-        level_row.addWidget(QLabel("Level:", central))
-
-        all_btn = QPushButton("All", central)
-        all_btn.clicked.connect(self._select_all_levels)
-        level_row.addWidget(all_btn)
-
-        self._level_btns: dict[str, QPushButton] = {}
-        for lvl in _ALL_LEVELS:
-            btn = QPushButton(lvl, central)
-            btn.setCheckable(True)
-            btn.setChecked(True)
-            btn.clicked.connect(lambda checked, l=lvl: self._toggle_level(l, checked))
-            level_row.addWidget(btn)
-            self._level_btns[lvl] = btn
-        level_row.addStretch()
-        layout.addLayout(level_row)
-
-        # ── Search bar ────────────────────────────────────────────────────────
-        search_row = QHBoxLayout()
-        search_row.addWidget(QLabel("Search:", central))
-        self._search = QLineEdit(central)
-        self._search.setPlaceholderText("Filter log messages...")
-        self._search.textChanged.connect(self._rerender)
-        search_row.addWidget(self._search)
-        layout.addLayout(search_row)
-
-        # ── Console ───────────────────────────────────────────────────────────
-        self._console = QPlainTextEdit(central)
-        self._console.setReadOnly(True)
-        self._console.setStyleSheet(
-            "background:#1e1e1e; color:#ffffff;"
-            "font-family: Consolas, 'Microsoft YaHei', Meiryo, monospace;"
-            "font-size: 10pt;"
-        )
-        layout.addWidget(self._console)
-
-        # ── Bottom bar ────────────────────────────────────────────────────────
-        bottom_row = QHBoxLayout()
-        copy_btn = QPushButton("📋 Copy All", central)
-        copy_btn.clicked.connect(self._copy_all)
-        close_btn = QPushButton("Close", central)
-        close_btn.clicked.connect(self.close)
-        bottom_row.addStretch()
-        bottom_row.addWidget(copy_btn)
-        bottom_row.addWidget(close_btn)
-        layout.addLayout(bottom_row)
-
-        self._rerender()
-
-    def _select_all_levels(self):
-        self._active_levels = set(_ALL_LEVELS)
-        for btn in self._level_btns.values():
-            btn.setChecked(True)
-        self._rerender()
-
-    def _toggle_level(self, level: str, checked: bool):
-        if checked:
-            self._active_levels.add(level)
-        else:
-            self._active_levels.discard(level)
-        self._rerender()
-
-    def _rerender(self):
-        query = self._search.text().lower()
-        self._console.clear()
-        for log in self._logs:
-            if log.level not in self._active_levels:
-                continue
-            if query and query not in log.message.lower():
-                continue
-            self._console.appendPlainText(log.message)
-
-    def _copy_all(self):
-        from PySide6.QtWidgets import QApplication
-        QApplication.clipboard().setText(self._console.toPlainText())
-
-    def _filter_logs(self, query: str):
-        filtered = [l for l in self._logs if query.lower() in l.message.lower()] if query else self._logs
-        self._render_logs(filtered)
