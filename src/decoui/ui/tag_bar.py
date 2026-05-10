@@ -5,6 +5,28 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QScrollArea, QWidget
 
 
+_PILL_STYLE = (
+    "QPushButton {"
+    "  border-radius: 12px;"
+    "  padding: 2px 12px;"
+    "  min-height: 22px;"
+    "  font-size: 9pt;"
+    "  border: 1px solid #d0d5e0;"
+    "  background: #ffffff;"
+    "  color: #344054;"
+    "}"
+    "QPushButton:checked {"
+    "  background: #3b5bdb;"
+    "  color: #ffffff;"
+    "  border-color: #3b5bdb;"
+    "}"
+    "QPushButton:hover:!checked {"
+    "  background: #f0f4ff;"
+    "  border-color: #7c90cc;"
+    "}"
+)
+
+
 class TagBar(QWidget):
     tags_changed = Signal(set)   # set of active tag strings
 
@@ -39,6 +61,7 @@ class TagBar(QWidget):
         all_btn = QPushButton("All", container)
         all_btn.setCheckable(True)
         all_btn.setChecked(True)
+        all_btn.setStyleSheet(_PILL_STYLE)
         all_btn.clicked.connect(self._clear_all)
         row.addWidget(all_btn)
         self._all_btn = all_btn
@@ -46,6 +69,7 @@ class TagBar(QWidget):
         for tag in sorted(all_tags):
             btn = QPushButton(tag, container)
             btn.setCheckable(True)
+            btn.setStyleSheet(_PILL_STYLE)
             btn.clicked.connect(lambda checked, t=tag: self._toggle_tag(t, checked))
             row.addWidget(btn)
             self._buttons[tag] = btn
