@@ -8,11 +8,13 @@ Supported types:
   list / list[X] → QTextEdit (comma- and newline-separated)
   dict           → QTextEdit (JSON / ast.literal_eval, raises on bad input)
   enum.Enum      → QComboBox (dropdown)
+  pathlib.Path   → QLineEdit + file-picker + folder-picker buttons
 """
 from __future__ import annotations
 
 import enum
 import inspect
+import pathlib
 import re
 from typing import Any, get_args, get_origin
 
@@ -20,7 +22,10 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
+    QFileDialog,
+    QHBoxLayout,
     QLineEdit,
+    QPushButton,
     QSpinBox,
     QTextEdit,
     QWidget,
@@ -31,6 +36,52 @@ from PySide6.QtWidgets import (
 
 class _DictTextEdit(QTextEdit):
     pass
+
+
+# ── Path widget: QLineEdit + file-picker + folder-picker ──────────────────────
+
+class _PathWidget(QWidget):
+    """Composite widget for pathlib.Path parameters."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+
+        self._edit = QLineEdit(self)
+        layout.addWidget(self._edit)
+
+        self._file_btn = QPushButton("File...", self)
+        self._file_btn.setFixedWidth(72)
+        self._file_btn.setToolTip("Select a file")
+        self._file_btn.clicked.connect(self._pick_file)
+        layout.addWidget(self._file_btn)
+
+        self._dir_btn = QPushButton("Folder...", self)
+        self._dir_btn.setFixedWidth(72)
+        self._dir_btn.setToolTip("Select a folder")
+        self._dir_btn.clicked.connect(self._pick_dir)
+        layout.addWidget(self._dir_btn)
+
+    def _pick_file(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Select File", self._edit.text())
+        if path:
+            self._edit.setText(path)
+
+    def _pick_dir(self):
+        path = QFileDialog.getExistingDirectory(self, "Select Folder", self._edit.text())
+        if path:
+            self._edit.setText(path)
+
+    def text(self) -> str:
+        return self._edit.text()
+
+    def setText(self, text: str) -> None:
+        self._edit.setText(text)
+
+    def setPlaceholderText(self, text: str) -> None:
+        self._edit.setPlaceholderText(text)
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -58,6 +109,8 @@ def get_value(widget: QWidget) -> Any:
         return widget.value()
     if isinstance(widget, QComboBox):
         return widget.currentData()
+    if isinstance(widget, _PathWidget):
+        return widget.text()
     if isinstance(widget, _DictTextEdit):
         return _parse_dict(widget.toPlainText().strip())
     if isinstance(widget, QTextEdit):
@@ -70,6 +123,9 @@ def get_value(widget: QWidget) -> Any:
 
 
 def set_value(widget: QWidget, value: Any) -> None:
+    if isinstance(widget, _PathWidget):
+        widget.setText(str(value) if value is not None else "")
+        return
     if isinstance(widget, QCheckBox):
         widget.setChecked(bool(value))
     elif isinstance(widget, QSpinBox):
@@ -120,6 +176,8 @@ def coerce_params(tool_info, raw: dict) -> tuple[dict, list[str]]:
         try:
             if ann is inspect.Parameter.empty or ann is str:
                 coerced[name] = value
+            elif ann is pathlib.Path:
+                coerced[name] = pathlib.Path(value) if value else pathlib.Path()
             elif ann is bool:
                 coerced[name] = bool(value)
             elif ann is int:
@@ -172,6 +230,13 @@ def _unwrap_optional(ann) -> Any:
 
 def _build_for_type(ann, default, parent) -> QWidget:
     import json
+
+    # pathlib.Path → _PathWidget
+    if ann is pathlib.Path:
+        w = _PathWidget(parent)
+        if default is not inspect.Parameter.empty and default is not None:
+            w.setText(str(default))
+        return w
 
     # dict → _DictTextEdit
     if ann is dict or get_origin(ann) is dict:
@@ -276,5 +341,5 @@ def _parse_dict(raw: str) -> dict:
 
 
 def _apply_placeholder(widget: QWidget, text: str) -> None:
-    if isinstance(widget, (QLineEdit, QTextEdit)):
+    if isinstance(widget, (_PathWidget, QLineEdit, QTextEdit)):
         widget.setPlaceholderText(text)
