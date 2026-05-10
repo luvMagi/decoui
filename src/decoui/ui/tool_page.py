@@ -7,9 +7,11 @@ from typing import Any
 from PySide6.QtCore import (
     QEasingCurve,
     QPropertyAnimation,
+    Signal,
 )
 from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
+    QApplication,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -25,6 +27,7 @@ from PySide6.QtWidgets import (
 from ..engine.executor import ExecutionEngine
 from ..registry import ToolInfo
 from ..widget_builder import build_widget, coerce_params, get_value, set_value
+from .log_window import LogEntry, LogWindow
 
 _LEVEL_COLORS = {
     "stdout":   "#FFFFFF",
@@ -35,8 +38,17 @@ _LEVEL_COLORS = {
     "CRITICAL": "#FF0000",
 }
 
+_STATUS_STYLES = {
+    "running":   "color:#fff; background:#3b5bdb; border-radius:10px; padding:2px 10px;",
+    "success":   "color:#fff; background:#2b9348; border-radius:10px; padding:2px 10px;",
+    "error":     "color:#fff; background:#dc3545; border-radius:10px; padding:2px 10px;",
+    "cancelled": "color:#fff; background:#6c757d; border-radius:10px; padding:2px 10px;",
+}
+
 
 class ToolPage(QWidget):
+    history_requested = Signal(str)   # emits tool_id
+
     def __init__(self, tool_info: ToolInfo, instance, parent=None):
         super().__init__(parent)
         self._tool = tool_info
@@ -44,6 +56,8 @@ class ToolPage(QWidget):
         self._engine = ExecutionEngine(self)
         self._start_time: float = 0.0
         self._widgets: dict[str, QWidget] = {}
+        self._log_records: list[LogEntry] = []
+        self._open_log_windows: list = []
 
         self._build_ui()
         self._engine.log_line.connect(self._append_log)
@@ -53,13 +67,16 @@ class ToolPage(QWidget):
 
     def _build_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(8, 8, 8, 8)
+        root.setContentsMargins(16, 12, 16, 12)
+        root.setSpacing(8)
 
-        # Header
+        # ── Header ────────────────────────────────────────────────────────────
         header = QHBoxLayout()
+        header.setSpacing(8)
         title = QLabel(f"<b>{self._tool.label}</b>", self)
-        title.setStyleSheet("font-size: 14px;")
+        title.setStyleSheet("font-size: 15px; color: #1e2128;")
         self._status_label = QLabel("", self)
+        self._status_label.setStyleSheet("background: transparent;")
         self._param_toggle_btn = QPushButton("▼ Parameters", self)
         self._param_toggle_btn.setCheckable(True)
         self._param_toggle_btn.setChecked(True)
@@ -70,21 +87,23 @@ class ToolPage(QWidget):
         header.addWidget(self._param_toggle_btn)
         root.addLayout(header)
 
+        # ── Description ───────────────────────────────────────────────────────
         if self._tool.description:
             desc = QLabel(self._tool.description, self)
             desc.setWordWrap(True)
             desc.setStyleSheet(
-                "color: #555555;"
-                "border: 1px solid #cccccc;"
-                "border-radius: 6px;"
-                "padding: 6px 10px;"
-                "background: #f9f9f9;"
+                "color: #5a6275;"
+                "border: 1px solid #e0e3ea;"
+                "border-radius: 8px;"
+                "padding: 8px 12px;"
+                "background: #f8f9fc;"
             )
             root.addWidget(desc)
 
-        # Progress bar (hidden until run)
+        # ── Progress bar (hidden until run) ───────────────────────────────────
         self._progress = QProgressBar(self)
         self._progress.setRange(0, 0)
+        self._progress.setFixedHeight(4)
         self._progress.setVisible(False)
         root.addWidget(self._progress)
 
@@ -92,6 +111,7 @@ class ToolPage(QWidget):
         self._param_panel = QWidget(self)
         form_layout = QFormLayout(self._param_panel)
         form_layout.setContentsMargins(0, 0, 0, 0)
+        form_layout.setSpacing(8)
 
         for param in self._tool.params:
             w = build_widget(param, self._param_panel)
@@ -106,19 +126,46 @@ class ToolPage(QWidget):
 
         # ── Action buttons ────────────────────────────────────────────────────
         btn_row = QHBoxLayout()
-        self._run_btn = QPushButton("▶ Run", self)
+        btn_row.setSpacing(6)
+        self._run_btn = QPushButton("▶  Run", self)
+        self._run_btn.setObjectName("run_btn")
         self._run_btn.setDefault(True)
         self._run_btn.clicked.connect(self._on_run)
-        self._reset_btn = QPushButton("↺ Reset", self)
+        self._reset_btn = QPushButton("↺  Reset", self)
         self._reset_btn.clicked.connect(self._reset_params)
-        self._stop_btn = QPushButton("■ Stop", self)
+        self._stop_btn = QPushButton("■  Stop", self)
+        self._stop_btn.setObjectName("stop_btn")
         self._stop_btn.setVisible(False)
         self._stop_btn.clicked.connect(self._engine.cancel)
+        self._replay_btn = QPushButton("Replay", self)
+        self._replay_btn.clicked.connect(
+            lambda: self.history_requested.emit(self._tool.tool_id)
+        )
         btn_row.addWidget(self._run_btn)
         btn_row.addWidget(self._reset_btn)
         btn_row.addWidget(self._stop_btn)
         btn_row.addStretch()
+        btn_row.addWidget(self._replay_btn)
         root.addLayout(btn_row)
+
+        # ── Output section header ─────────────────────────────────────────────
+        out_hdr = QHBoxLayout()
+        out_hdr.setContentsMargins(0, 4, 0, 0)
+        out_lbl = QLabel("Output", self)
+        out_lbl.setStyleSheet("font-weight: bold; color: #667085; font-size: 9pt; background: transparent;")
+        out_hdr.addWidget(out_lbl)
+        out_hdr.addStretch()
+        self._copy_btn = QPushButton("Copy", self)
+        self._copy_btn.setFixedHeight(24)
+        self._copy_btn.setStyleSheet("padding: 0 10px; font-size: 9pt;")
+        self._copy_btn.clicked.connect(self._copy_console)
+        self._expand_btn = QPushButton("View Log", self)
+        self._expand_btn.setFixedHeight(24)
+        self._expand_btn.setStyleSheet("padding: 0 10px; font-size: 9pt;")
+        self._expand_btn.clicked.connect(self._expand_console)
+        out_hdr.addWidget(self._copy_btn)
+        out_hdr.addWidget(self._expand_btn)
+        root.addLayout(out_hdr)
 
         # ── Output console ────────────────────────────────────────────────────
         self._console = QPlainTextEdit(self)
@@ -126,7 +173,7 @@ class ToolPage(QWidget):
         self._console.setMinimumHeight(120)
         self._console.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._console.setStyleSheet(
-            "background:#1e1e1e; color:#ffffff;"
+            "background:#1e1e1e; color:#ffffff; border-radius:6px;"
             "font-family: Consolas, 'Microsoft YaHei', Meiryo, monospace;"
             "font-size: 10pt;"
         )
@@ -175,6 +222,7 @@ class ToolPage(QWidget):
         params, errors = coerce_params(self._tool, raw)
 
         self._console.clear()
+        self._log_records.clear()
 
         if errors:
             for tb in errors:
@@ -185,7 +233,8 @@ class ToolPage(QWidget):
         self._run_btn.setVisible(False)
         self._stop_btn.setVisible(True)
         self._progress.setVisible(True)
-        self._status_label.setText("▶ Running...")
+        self._status_label.setText("Running…")
+        self._status_label.setStyleSheet(_STATUS_STYLES["running"])
         self._set_params_readonly(True)
         self._collapse_params()
 
@@ -195,18 +244,23 @@ class ToolPage(QWidget):
         elapsed = time.monotonic() - self._start_time
         self._progress.setVisible(False)
         self._run_btn.setVisible(True)
-        self._run_btn.setText("▶ Run Again")
+        self._run_btn.setText("▶  Run Again")
         self._stop_btn.setVisible(False)
         self._set_params_readonly(False)
 
         if status == "success":
-            self._status_label.setText(f"✅ Done ({elapsed:.1f}s)")
+            self._status_label.setText(f"Done ({elapsed:.1f}s)")
+            self._status_label.setStyleSheet(_STATUS_STYLES["success"])
         elif status == "error":
-            self._status_label.setText(f"❌ Error ({elapsed:.1f}s)")
+            self._status_label.setText(f"Error ({elapsed:.1f}s)")
+            self._status_label.setStyleSheet(_STATUS_STYLES["error"])
         else:
-            self._status_label.setText("⛔ Cancelled")
+            self._status_label.setText("Cancelled")
+            self._status_label.setStyleSheet(_STATUS_STYLES["cancelled"])
 
     def _append_log(self, level: str, message: str):
+        self._log_records.append(LogEntry(level, message))
+
         color = _LEVEL_COLORS.get(level, "#FFFFFF")
         fmt = QTextCharFormat()
         fmt.setForeground(QColor(color))
@@ -219,12 +273,18 @@ class ToolPage(QWidget):
         self._console.setTextCursor(cursor)
         self._console.ensureCursorVisible()
 
+    def _copy_console(self):
+        QApplication.clipboard().setText(self._console.toPlainText())
+
+    def _expand_console(self):
+        win = LogWindow(self._tool.label, list(self._log_records))
+        win.show()
+        self._open_log_windows.append(win)
+
     def _reset_params(self):
-        for param in self._tool.params:
-            w = self._widgets[param.name]
-            default = param.default if param.has_default else None
-            if default is not None:
-                set_value(w, default)
+        self._console.clear()
+        self._log_records.clear()
+        self._expand_params()
 
     def _set_params_readonly(self, readonly: bool):
         self._param_panel.setEnabled(not readonly)

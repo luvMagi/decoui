@@ -43,6 +43,7 @@ def gui_main(title: str = "decoui", db_path: str | Path | None = None) -> None:
     app = QApplication.instance() or QApplication(sys.argv)
     app.setWindowIcon(QIcon(str(_icon_path())))
     _apply_fonts(app)
+    _apply_theme(app)
 
     init_db()
     tree = build_tree(*toolset_classes)
@@ -54,14 +55,235 @@ def gui_main(title: str = "decoui", db_path: str | Path | None = None) -> None:
     sys.exit(app.exec())
 
 
-def _apply_fonts(app) -> None:
-    """Set app-wide UI font with CJK fallback chain."""
-    from PySide6.QtGui import QFont
+_APP_STYLESHEET = """
+QWidget {
+    background-color: #f5f6fa;
+    color: #1e2128;
+}
+QMainWindow > QWidget,
+QStackedWidget > QWidget {
+    background-color: #ffffff;
+}
+/* Sidebar */
+QWidget#sidebar {
+    background-color: #f8faff;
+    border-right: 1px solid #e4e7ef;
+}
+QWidget#sidebar QLineEdit {
+    background-color: #ffffff;
+}
+/* Tree */
+QTreeWidget {
+    background-color: #f8faff;
+    border: none;
+    outline: none;
+    padding: 2px;
+}
+QTreeWidget::item {
+    padding: 4px 6px;
+    border-radius: 5px;
+}
+QTreeWidget::item:hover {
+    background-color: #edf0fb;
+}
+QTreeWidget::item:selected {
+    background-color: #dbe4ff;
+    color: #1e2128;
+}
+/* Splitter */
+QSplitter::handle:horizontal {
+    background-color: #e4e7ef;
+    width: 1px;
+}
+/* Buttons */
+QPushButton {
+    background-color: #ffffff;
+    border: 1px solid #d0d5e0;
+    border-radius: 6px;
+    padding: 4px 14px;
+    color: #344054;
+    min-height: 26px;
+}
+QPushButton:hover {
+    background-color: #f0f4ff;
+    border-color: #7c90cc;
+}
+QPushButton:pressed {
+    background-color: #e0e8ff;
+}
+QPushButton:checked {
+    background-color: #3b5bdb;
+    color: #ffffff;
+    border-color: #3b5bdb;
+}
+QPushButton:disabled {
+    color: #aab0bf;
+    border-color: #e4e7ef;
+    background-color: #f8f9fc;
+}
+QPushButton#run_btn {
+    background-color: #2b9348;
+    color: #ffffff;
+    border-color: #2b9348;
+    font-weight: bold;
+}
+QPushButton#run_btn:hover {
+    background-color: #218838;
+    border-color: #218838;
+}
+QPushButton#stop_btn {
+    background-color: #dc3545;
+    color: #ffffff;
+    border-color: #dc3545;
+}
+QPushButton#stop_btn:hover {
+    background-color: #c82333;
+    border-color: #c82333;
+}
+/* Inputs */
+QLineEdit {
+    background-color: #ffffff;
+    border: 1px solid #d0d5e0;
+    border-radius: 6px;
+    padding: 4px 8px;
+    min-height: 24px;
+}
+QLineEdit:focus {
+    border-color: #3b5bdb;
+}
+QTextEdit {
+    background-color: #ffffff;
+    border: 1px solid #d0d5e0;
+    border-radius: 6px;
+    padding: 4px 8px;
+}
+QTextEdit:focus {
+    border-color: #3b5bdb;
+}
+QSpinBox, QDoubleSpinBox {
+    background-color: #ffffff;
+    border: 1px solid #d0d5e0;
+    border-radius: 6px;
+    padding: 3px 8px 3px 8px;
+    min-height: 26px;
+}
+QSpinBox:focus, QDoubleSpinBox:focus {
+    border-color: #3b5bdb;
+}
+QSpinBox::up-button, QDoubleSpinBox::up-button,
+QSpinBox::down-button, QDoubleSpinBox::down-button {
+    width: 0;
+    border: none;
+    background: none;
+}
+QComboBox {
+    background-color: #ffffff;
+    border: 1px solid #d0d5e0;
+    border-radius: 6px;
+    padding: 3px 8px;
+    min-height: 26px;
+}
+QComboBox:focus {
+    border-color: #3b5bdb;
+}
+QComboBox::drop-down {
+    border: none;
+    width: 24px;
+}
+QComboBox QAbstractItemView {
+    background-color: #ffffff;
+    border: 1px solid #d0d5e0;
+    selection-background-color: #dbe4ff;
+    selection-color: #1e2128;
+    outline: none;
+}
+QCheckBox {
+    spacing: 6px;
+    background: transparent;
+}
+QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+    border: 1.5px solid #d0d5e0;
+    border-radius: 4px;
+    background: #ffffff;
+}
+QCheckBox::indicator:checked {
+    background-color: #3b5bdb;
+    border-color: #3b5bdb;
+}
+/* Progress */
+QProgressBar {
+    border: none;
+    border-radius: 2px;
+    background-color: #e4e7ef;
+}
+QProgressBar::chunk {
+    background-color: #3b5bdb;
+    border-radius: 2px;
+}
+/* Table */
+QTableWidget {
+    background-color: #ffffff;
+    border: 1px solid #e4e7ef;
+    border-radius: 8px;
+    gridline-color: #f0f2f8;
+    outline: none;
+}
+QHeaderView::section {
+    background-color: #f8f9fc;
+    border: none;
+    border-bottom: 1px solid #e4e7ef;
+    padding: 6px 8px;
+    font-weight: bold;
+    color: #667085;
+}
+QTableWidget::item {
+    padding: 4px 8px;
+}
+QTableWidget::item:selected {
+    background-color: #dbe4ff;
+    color: #1e2128;
+}
+/* Scrollbars */
+QScrollBar:vertical {
+    background: transparent;
+    width: 8px;
+    margin: 0;
+}
+QScrollBar::handle:vertical {
+    background: #c0c8d8;
+    border-radius: 4px;
+    min-height: 24px;
+}
+QScrollBar::handle:vertical:hover {
+    background: #8a96b0;
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+QScrollBar:horizontal {
+    background: transparent;
+    height: 8px;
+    margin: 0;
+}
+QScrollBar::handle:horizontal {
+    background: #c0c8d8;
+    border-radius: 4px;
+    min-width: 24px;
+}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
+"""
 
+
+def _apply_fonts(app) -> None:
+    from PySide6.QtGui import QFont
     ui_font = QFont()
     ui_font.setFamilies(["Microsoft YaHei", "Meiryo", "Segoe UI", "sans-serif"])
     ui_font.setPointSize(10)
     app.setFont(ui_font)
+
+
+def _apply_theme(app) -> None:
+    app.setStyleSheet(_APP_STYLESHEET)
 
 
 def _icon_path() -> Path:
