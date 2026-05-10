@@ -99,6 +99,7 @@ class HistoryPage(QWidget):
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._table.itemClicked.connect(self._on_item_clicked)
+        self._table.currentCellChanged.connect(self._on_current_cell_changed)
         self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._table.customContextMenuRequested.connect(self._context_menu)
         layout.addWidget(self._table)
@@ -206,6 +207,12 @@ class HistoryPage(QWidget):
         self.refresh()
 
     # ── Row click ─────────────────────────────────────────────────────────────
+
+    def _on_current_cell_changed(self, row: int, col: int, prev_row: int, _prev_col: int):
+        if row != prev_row and row >= 0:
+            item = self._table.item(row, _COL_TOOL)
+            if item:
+                self._on_item_clicked(item)
 
     def _on_item_clicked(self, item: QTableWidgetItem):
         row = item.row()
