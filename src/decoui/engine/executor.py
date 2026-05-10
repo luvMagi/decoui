@@ -78,9 +78,9 @@ class ExecutionEngine(QObject):
         result_json = None
         if result is not None:
             try:
-                result_json = json.dumps(result, default=str)
+                result_json = json.dumps(result, default=str, ensure_ascii=False)
             except Exception:
-                result_json = json.dumps(str(result))
+                result_json = json.dumps(str(result), ensure_ascii=False)
         update_record(
             self._record_id,
             status=status,
@@ -105,7 +105,7 @@ class ExecutionEngine(QObject):
         for p in tool_info.params:
             val = params.get(p.name)
             try:
-                serialized = json.dumps(val, default=str)
+                serialized = json.dumps(val, default=str, ensure_ascii=False)
             except Exception:
                 serialized = str(val)
             type_name = type(val).__name__ if val is not None else "NoneType"

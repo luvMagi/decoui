@@ -27,6 +27,7 @@ class NavTree(QWidget):
         self._tw = QTreeWidget(self)
         self._tw.setHeaderHidden(True)
         self._tw.itemClicked.connect(self._on_item_clicked)
+        self._tw.currentItemChanged.connect(self._on_current_changed)
         layout.addWidget(self._tw)
 
         self._populate()
@@ -67,6 +68,10 @@ class NavTree(QWidget):
     def set_active_tags(self, tags: set[str]):
         self._active_tags = tags
         self._populate()
+
+    def _on_current_changed(self, current: QTreeWidgetItem, _prev):
+        if current:
+            self._on_item_clicked(current, 0)
 
     def _on_item_clicked(self, item: QTreeWidgetItem, _col: int):
         data = item.data(0, Qt.ItemDataRole.UserRole)
