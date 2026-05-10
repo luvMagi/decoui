@@ -122,10 +122,28 @@ gui_main(title="My App", db_path="~/.myapp/history.db")
 | `list` | `QTextEdit` | One item per line or comma-separated. |
 | `dict` | `QTextEdit` | JSON input; parsed with `json.loads` then `ast.literal_eval`. Raises on invalid input. |
 | `Enum` subclass | `QComboBox` | Dropdown of enum members. |
+| `pathlib.Path` | `QLineEdit` + buttons | Text field with **File...** (file picker) and **Folder...** (directory picker) buttons. The selected path is passed as a `pathlib.Path` to the method. |
 
 - Required parameters (no default) are marked with a red `*` in the form label.
 - `Optional[X]` is unwrapped to `X`.
 - Default values are pre-filled into widgets automatically.
+
+### `pathlib.Path` example
+
+```python
+import pathlib
+from decoui import tool, toolset
+
+@toolset(label="File Tools")
+class FileTools:
+
+    @tool(label="File Info", placeholders={"path": "Select a file or folder…"})
+    def file_info(self, path: pathlib.Path) -> None:
+        import logging
+        p = pathlib.Path(path)
+        logging.info("size: %d bytes", p.stat().st_size)
+        logging.info("resolved: %s", p.resolve())
+```
 
 ---
 

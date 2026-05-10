@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import enum
 import logging
+import pathlib
 import time
 
 from decoui import tool, toolset
@@ -242,6 +243,26 @@ class DemoTools:
         for k, v in data.items():
             print(f"  {k}: {v!r}")
         return json.dumps(data, ensure_ascii=False, indent=2 if pretty else None)
+
+    @tool(
+        label="File Info",
+        description="Show basic info about a file or folder. Demonstrates pathlib.Path parameter.",
+        placeholders={"path": "Select a file or folder…"},
+    )
+    def file_info(self, path: pathlib.Path = pathlib.Path()) -> str:
+        if not path or not str(path):
+            return "No path provided."
+        p = pathlib.Path(path)
+        if not p.exists():
+            return f"Path does not exist: {p}"
+        stat = p.stat()
+        kind = "directory" if p.is_dir() else "file"
+        logging.info("inspecting %s: %s", kind, p)
+        return (
+            f"Type : {kind}\n"
+            f"Path : {p.resolve()}\n"
+            f"Size : {stat.st_size:,} bytes"
+        )
 
     @tool(
         label="Slow Task",
