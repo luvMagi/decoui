@@ -1,0 +1,49 @@
+[project]
+name = "decoui"
+version = "0.1.0"
+description = "Decorator-driven GUI framework for Python — generate PySide6 UIs from type annotations"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["gui", "decorator", "pyside6", "qt", "ui", "framework"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: User Interfaces",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "PySide6>=6.6.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/luvmagi/decoui"
+Repository = "https://github.com/luvmagi/decoui"
+Issues = "https://github.com/luvmagi/decoui/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/decoui"]
+
+[tool.hatch.build.targets.wheel.shared-data]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/decoui/icon.png"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/decoui/icon.png" = "decoui/icon.png"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "twine>=5.0",
+]
