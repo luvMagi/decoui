@@ -102,6 +102,8 @@ def build_tree(*toolset_classes) -> list[ToolSetInfo]:
                 return_annotation=return_ann,
             ))
 
+        ts.tools.sort(key=lambda t: t.label.casefold())
         tree.append(ts)
 
+    tree.sort(key=lambda s: s.label.casefold())
     return tree

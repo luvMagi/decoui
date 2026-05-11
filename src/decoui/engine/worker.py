@@ -1,6 +1,7 @@
 """QRunnable worker with stdout/logging capture."""
 from __future__ import annotations
 
+import ctypes
 import io
 import logging
 import sys
@@ -8,7 +9,12 @@ import threading
 import traceback
 from datetime import datetime
 
+
 from PySide6.QtCore import QObject, QRunnable, Signal
+
+
+class _WorkerCancelled(BaseException):
+    """Injected into the worker thread by cancel() to interrupt execution."""
 
 
 class WorkerSignals(QObject):
@@ -69,8 +75,15 @@ class ToolWorker(QRunnable):
 
     def cancel(self):
         self._cancelled = True
+        tid = getattr(self, "_thread_id", None)
+        if tid is not None:
+            ctypes.pythonapi.PyThreadState_SetAsyncExc(
+                ctypes.c_ulong(tid),
+                ctypes.py_object(_WorkerCancelled),
+            )
 
     def run(self):
+        self._thread_id = threading.current_thread().ident
         original_stdout = sys.stdout
         redirect = _StreamRedirect(self.signals, original_stdout)
         handler = _SignalHandler(self.signals)
@@ -94,6 +107,9 @@ class ToolWorker(QRunnable):
                 self.signals.finished.emit(None, "cancelled")
             else:
                 self.signals.finished.emit(result, "success")
+        except _WorkerCancelled:
+            redirect.flush()
+            self.signals.finished.emit(None, "cancelled")
         except Exception as exc:
             redirect.flush()
             msg = traceback.format_exc()
