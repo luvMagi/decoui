@@ -30,9 +30,9 @@ from ..widget_builder import build_widget, coerce_params, get_value, set_value
 from .log_window import LogEntry, LogWindow
 
 _LEVEL_COLORS = {
-    "stdout":   "#FFFFFF",
+    "stdout":   "#39FF14",
     "DEBUG":    "#A0A0A0",
-    "INFO":     "#00BFFF",
+    "INFO":     "#39FF14",
     "WARNING":  "#FFD700",
     "ERROR":    "#FF6B6B",
     "CRITICAL": "#FF0000",

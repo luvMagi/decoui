@@ -66,9 +66,9 @@ decoui/
 | `widget_builder.py` | Map type annotations to PySide6 widgets; `_DictTextEdit` marker subclass |
 | `engine/worker.py` | `QRunnable` with `sys.stdout` redirect and `logging.Handler` attachment |
 | `engine/executor.py` | Schedule runs; `ExecutionRecord` lifecycle; log batch writing |
-| `storage/db.py` | SQLite init, insert, query, delete; WAL mode |
+| `storage/db.py` | SQLite history CRUD and key-value application settings; WAL mode |
 | `storage/models.py` | `ExecutionRecord`, `ExecutionParam`, `ExecutionLog` dataclasses |
-| `ui/main_window.py` | QSplitter layout; sidebar + stacked widget; signal wiring |
+| `ui/main_window.py` | QSplitter layout; persistent sidebar; stacked history/tool-tab views; signal wiring |
 | `ui/nav_tree.py` | Two-layer tree; search; tag filtering; keyboard navigation |
 | `ui/tag_bar.py` | Pill-style checkable tag buttons |
 | `ui/tool_page.py` | Form generation; collapse animation; output console; Replay button |
@@ -166,8 +166,9 @@ Before calling the tool method, `coerce_params()` casts widget values to their d
 │  Tags:  [All]  [basic]  [demo]  [math]  [text]                 │
 ├──────────────────┬──────────────────────────────────────────────┤
 │  Sidebar         │  QStackedWidget (main area)                  │
-│                  │                                              │
-│  🔍 Search…      │  ← ToolPage or HistoryPage                   │
+│                  │ ┌──────────┬──────────┬──────────┐           │
+│  🔍 Search…      │ │ Tool A × │ Tool B × │ Tool C × │           │
+│                  │ └──────────┴──────────┴──────────┘           │
 │                  │                                              │
 │  ▼ Text Tools    │                                              │
 │    Count Chars   │                                              │
@@ -182,10 +183,14 @@ Before calling the tool method, `coerce_params()` casts widget values to their d
 - The sidebar has a light blue-gray tint (`#f8faff`).
 - A 1 px separator line is provided by the `QSplitter` handle.
 - Default splitter ratio: 220 px sidebar / 880 px content.
+- The sidebar width is restored from `ui.sidebar.width` in `app_setting`.
+- Tool pages open in movable, closable tabs. Closing a tab hides it without destroying its page or interrupting a running task; selecting the tool again restores the same page.
+- Right-clicking a tab opens **Close Tab** and **Close Others** actions. **Close Others** keeps and activates the right-clicked tab, and is disabled when only one tab is open.
+- History and the tabbed tool workspace remain separate pages in the outer `QStackedWidget`.
 
 ### 5.2 Sidebar (NavTree)
 
-- Two-layer tree: **ToolSet (bold)** → Tool (indent).
+- Two-layer tree: **ToolSet (bold)** → Tool (half of the platform-default indentation).
 - Search box filters tool labels in real time (hides tools that don't match, removes toolsets with zero visible tools).
 - Tag filter hides the **entire toolset** if its tags don't include all active tags.
 - Toolset description shown as a tooltip on hover.
@@ -248,7 +253,7 @@ Before calling the tool method, `coerce_params()` casts widget values to their d
 Shared by ToolPage ("View Log") and HistoryPage ("View Full Log"). Implemented in `ui/log_window.py`.
 
 - Independent `QMainWindow`, resizable, `WA_DeleteOnClose`.
-- Level filter buttons: **All**, stdout, DEBUG, INFO, WARNING, ERROR, CRITICAL.
+- Level filter buttons: **All**, **None**, stdout, DEBUG, INFO, WARNING, ERROR, CRITICAL.
 - Search bar: real-time substring filter.
 - Coloured text matching the console colour scheme.
 - **Copy All** copies filtered text to clipboard.
@@ -288,9 +293,9 @@ On finished:
 
 | Source / Level | Console Colour |
 |---|---|
-| `print` / stdout | White `#FFFFFF` |
+| `print` / stdout | Phosphor Green `#39FF14` |
 | `logging.DEBUG` | Gray `#A0A0A0` |
-| `logging.INFO` | Cyan `#00BFFF` |
+| `logging.INFO` | Phosphor Green `#39FF14` |
 | `logging.WARNING` | Yellow `#FFD700` |
 | `logging.ERROR` | Red `#FF6B6B` |
 | `logging.CRITICAL` | Bold Red `#FF0000` |
@@ -330,6 +335,12 @@ CREATE TABLE execution_log (
     logged_at    DATETIME NOT NULL
 );
 
+CREATE TABLE app_setting (
+    key          TEXT PRIMARY KEY,
+    value        TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
+
 CREATE INDEX idx_log_record ON execution_log(record_id, seq);
 ```
 
@@ -337,10 +348,11 @@ CREATE INDEX idx_log_record ON execution_log(record_id, seq);
 - `sqlite3.DETECT_TYPES` is not used (removed for Python 3.14 compatibility).
 - `datetime` fields stored/retrieved as ISO strings and parsed manually.
 - Parameter values serialized with `json.dumps(..., ensure_ascii=False)` to preserve CJK characters.
+- Application settings use stable dotted keys and string values. Writes use an upsert so callers can add settings without schema changes.
 
 ### 7.2 Default DB Path
 
-`~/.decoui/history.db` — overridable via `gui_main(db_path=...)`.
+`~/.decoui/history.db` — stores execution history and application settings; overridable via `gui_main(db_path=...)`.
 
 ### 7.3 Parameter Replay
 
@@ -348,6 +360,14 @@ CREATE INDEX idx_log_record ON execution_log(record_id, seq);
 2. Each `param_value` (JSON string) is decoded with `json.loads`; fallback to raw string on failure.
 3. `HistoryPage.replay_requested` signal emits `(tool_id, param_map)`.
 4. `MainWindow._replay()` calls `ToolPage.restore_params(param_map)` → `set_value()` per widget → `_expand_params()`.
+
+### 7.4 Application Settings
+
+- `get_setting(key, default)` reads a value from `app_setting`.
+- `set_setting(key, value)` inserts or updates a value and its timestamp.
+- `ui.sidebar.width` stores the first `QSplitter` pane width in pixels.
+- Splitter writes are debounced by 250 ms and flushed again when the main window closes.
+- Invalid or missing sidebar values fall back to 220 px.
 
 ---
 

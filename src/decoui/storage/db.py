@@ -1,4 +1,4 @@
-"""SQLite CRUD operations for decoui execution history."""
+"""SQLite persistence for decoui execution history and application settings."""
 from __future__ import annotations
 
 import sqlite3
@@ -66,6 +66,12 @@ CREATE TABLE IF NOT EXISTS execution_log (
     logged_at    TEXT    NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS app_setting (
+    key          TEXT PRIMARY KEY,
+    value        TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_log_record ON execution_log(record_id, seq);
 """
 
@@ -73,6 +79,44 @@ CREATE INDEX IF NOT EXISTS idx_log_record ON execution_log(record_id, seq);
 def init_db() -> None:
     with _conn() as con:
         con.executescript(_SCHEMA)
+
+
+def get_setting(key: str, default: str | None = None) -> str | None:
+    """Return a persisted application setting.
+
+    Args:
+        key: Stable setting identifier.
+        default: Value returned when the setting does not exist.
+
+    Returns:
+        The stored string value, or the provided default.
+    """
+    with _conn() as con:
+        row = con.execute(
+            "SELECT value FROM app_setting WHERE key = ?",
+            (key,),
+        ).fetchone()
+    return str(row[0]) if row is not None else default
+
+
+def set_setting(key: str, value: str) -> None:
+    """Insert or update a persisted application setting.
+
+    Args:
+        key: Stable setting identifier.
+        value: String representation of the setting value.
+    """
+    with _conn() as con:
+        con.execute(
+            """
+            INSERT INTO app_setting (key, value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = excluded.updated_at
+            """,
+            (key, value, datetime.now().isoformat()),
+        )
 
 
 def insert_record(rec: ExecutionRecord) -> int:

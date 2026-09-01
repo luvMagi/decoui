@@ -12,6 +12,8 @@ Decorator-driven GUI framework for Python. Annotate your methods — decoui gene
 - **Native type mapping** — `str`, `int`, `float`, `bool`, `list`, `dict`, `Enum` → widgets automatically
 - **Async execution** — every tool runs in a thread; stdout and `logging` are captured in real time
 - **Execution history** — every run is persisted to SQLite with parameters, logs, and status
+- **Parallel tool tabs** — keep multiple tool pages open and switch between running tasks
+- **Persistent layout** — sidebar width is restored from the application database
 - **Replay** — restore any past run's parameters with one click
 - **Light theme** — clean built-in stylesheet, Consolas / 微软雅黑 / Meiryo font stack
 
@@ -107,7 +109,7 @@ gui_main(title="My App", db_path="~/.myapp/history.db")
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `title` | `str` | `"decoui"` | Window title. |
-| `db_path` | `str\|Path\|None` | `~/.decoui/history.db` | SQLite database path for execution history. |
+| `db_path` | `str\|Path\|None` | `~/.decoui/history.db` | SQLite database path for execution history and application settings. |
 
 ---
 

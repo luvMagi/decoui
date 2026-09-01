@@ -21,9 +21,9 @@ LogEntry = namedtuple("LogEntry", ["level", "message"])
 _ALL_LEVELS = ["stdout", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
 _LEVEL_COLORS = {
-    "stdout":   "#FFFFFF",
+    "stdout":   "#39FF14",
     "DEBUG":    "#A0A0A0",
-    "INFO":     "#00BFFF",
+    "INFO":     "#39FF14",
     "WARNING":  "#FFD700",
     "ERROR":    "#FF6B6B",
     "CRITICAL": "#FF0000",
@@ -56,6 +56,10 @@ class LogWindow(QMainWindow):
         all_btn = QPushButton("All", central)
         all_btn.clicked.connect(self._select_all_levels)
         level_row.addWidget(all_btn)
+
+        none_btn = QPushButton("None", central)
+        none_btn.clicked.connect(self._clear_all_levels)
+        level_row.addWidget(none_btn)
 
         self._level_btns: dict[str, QPushButton] = {}
         for lvl in _ALL_LEVELS:
@@ -104,6 +108,13 @@ class LogWindow(QMainWindow):
         self._active_levels = set(_ALL_LEVELS)
         for btn in self._level_btns.values():
             btn.setChecked(True)
+        self._rerender()
+
+    def _clear_all_levels(self) -> None:
+        """Clear all active level filters and hide every log entry."""
+        self._active_levels.clear()
+        for btn in self._level_btns.values():
+            btn.setChecked(False)
         self._rerender()
 
     def _toggle_level(self, level: str, checked: bool):
