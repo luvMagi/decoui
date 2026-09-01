@@ -22,15 +22,10 @@ Output goes to `dist/`.
 ### 3. Publish
 
 ```bash
-uv publish
+uv run twine upload dist/*
 ```
 
-Enter your PyPI credentials when prompted, or set them as environment variables to skip the prompt:
-
-```bash
-UV_PUBLISH_USERNAME=__token__
-UV_PUBLISH_PASSWORD=pypi-your-api-token
-```
+Credentials are read automatically from `~/.pypirc` — no prompt needed.
 
 ### 4. Verify
 

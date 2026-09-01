@@ -26,6 +26,7 @@ class NavTree(QWidget):
 
         self._tw = QTreeWidget(self)
         self._tw.setHeaderHidden(True)
+        self._tw.setIndentation(max(1, self._tw.indentation() // 2))
         self._tw.itemClicked.connect(self._on_item_clicked)
         self._tw.currentItemChanged.connect(self._on_current_changed)
         layout.addWidget(self._tw)

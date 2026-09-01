@@ -17,7 +17,8 @@ def gui_main(title: str = "decoui", db_path: str | Path | None = None) -> None:
 
     Args:
         title:   Window title.
-        db_path: Path to the SQLite history database. Defaults to ~/.decoui/history.db.
+        db_path: Path to the SQLite history and settings database. Defaults to
+            ~/.decoui/history.db.
     """
     if db_path is not None:
         set_db_path(Path(db_path))
@@ -94,6 +95,25 @@ QTreeWidget::item:selected {
 QSplitter::handle:horizontal {
     background-color: #e4e7ef;
     width: 1px;
+}
+/* Tabs */
+QTabWidget::pane {
+    border: none;
+    border-top: 1px solid #e4e7ef;
+    background-color: #ffffff;
+}
+QTabBar::tab {
+    background-color: #eef1f7;
+    border: 1px solid #d9deea;
+    border-bottom: none;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+    padding: 7px 12px;
+    margin-right: 2px;
+}
+QTabBar::tab:selected {
+    background-color: #ffffff;
+    color: #3b5bdb;
 }
 /* Buttons */
 QPushButton {
