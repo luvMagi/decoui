@@ -106,6 +106,7 @@ def test_tab_context_menu_closes_selected_or_other_tabs(
     assert [action.text() for action in context_menu.actions()] == [
         "Close Tab",
         "Close Others",
+        "Close All",
     ]
 
     context_menu.actions()[1].trigger()
@@ -119,6 +120,13 @@ def test_tab_context_menu_closes_selected_or_other_tabs(
 
     assert window._tabs.count() == 1
     assert window._tabs.currentWidget() is first_page
+
+    window._show_tool(tree[0].tools[1])
+    context_menu = window._create_tab_context_menu(0)
+    context_menu.actions()[2].trigger()
+
+    assert window._tabs.count() == 0
+    assert window._stack.currentWidget() is window._welcome
 
     window.close()
 
