@@ -175,6 +175,12 @@ class MainWindow(QMainWindow):
         self._tabs.setCurrentWidget(selected_page)
         self._stack.setCurrentWidget(self._tabs)
 
+    def _close_all_tabs(self) -> None:
+        """Hide every tool tab and return to the welcome page."""
+        while self._tabs.count() > 0:
+            self._tabs.removeTab(self._tabs.count() - 1)
+        self._stack.setCurrentWidget(self._welcome)
+
     def _create_tab_context_menu(self, index: int) -> QMenu:
         """Create tab actions bound to the tab at the provided index.
 
@@ -187,12 +193,16 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         close_tab_action = menu.addAction("Close Tab")
         close_other_tabs_action = menu.addAction("Close Others")
+        close_all_tabs_action = menu.addAction("Close All")
         close_other_tabs_action.setEnabled(self._tabs.count() > 1)
         close_tab_action.triggered.connect(
             lambda _checked=False: self._close_tool_tab(index)
         )
         close_other_tabs_action.triggered.connect(
             lambda _checked=False: self._close_other_tabs(index)
+        )
+        close_all_tabs_action.triggered.connect(
+            lambda _checked=False: self._close_all_tabs()
         )
         return menu
 

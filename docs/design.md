@@ -185,7 +185,7 @@ Before calling the tool method, `coerce_params()` casts widget values to their d
 - Default splitter ratio: 220 px sidebar / 880 px content.
 - The sidebar width is restored from `ui.sidebar.width` in `app_setting`.
 - Tool pages open in movable, closable tabs. Closing a tab hides it without destroying its page or interrupting a running task; selecting the tool again restores the same page.
-- Right-clicking a tab opens **Close Tab** and **Close Others** actions. **Close Others** keeps and activates the right-clicked tab, and is disabled when only one tab is open.
+- Right-clicking a tab opens **Close Tab**, **Close Others**, and **Close All** actions. **Close Others** keeps and activates the right-clicked tab, and is disabled when only one tab is open. **Close All** returns to the welcome page without destroying tool pages or interrupting running tasks.
 - History and the tabbed tool workspace remain separate pages in the outer `QStackedWidget`.
 
 ### 5.2 Sidebar (NavTree)
