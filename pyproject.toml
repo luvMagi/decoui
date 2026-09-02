@@ -40,5 +40,5 @@ packages = ["src/decoui"]
 [dependency-groups]
 dev = [
     "pytest>=8.0",
-    "twine>=5.0",
+    "twine>=7.0",
 ]
