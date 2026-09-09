@@ -18,6 +18,7 @@ import pathlib
 import re
 from typing import Any, get_args, get_origin
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -41,7 +42,14 @@ class _DictTextEdit(QTextEdit):
 # ── Path widget: QLineEdit + file-picker + folder-picker ──────────────────────
 
 class _PathWidget(QWidget):
-    """Composite widget for pathlib.Path parameters."""
+    """Composite widget for pathlib.Path parameters.
+
+    Attributes:
+        committed: Emitted when the user finishes editing the path, either by
+            leaving the line edit or by accepting a file/folder dialog.
+    """
+
+    committed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -50,6 +58,7 @@ class _PathWidget(QWidget):
         layout.setSpacing(4)
 
         self._edit = QLineEdit(self)
+        self._edit.editingFinished.connect(self.committed)
         layout.addWidget(self._edit)
 
         self._file_btn = QPushButton("File...", self)
@@ -68,11 +77,13 @@ class _PathWidget(QWidget):
         path, _ = QFileDialog.getOpenFileName(self, "Select File", self._edit.text())
         if path:
             self._edit.setText(path)
+            self.committed.emit()
 
     def _pick_dir(self):
         path = QFileDialog.getExistingDirectory(self, "Select Folder", self._edit.text())
         if path:
             self._edit.setText(path)
+            self.committed.emit()
 
     def text(self) -> str:
         return self._edit.text()
@@ -152,6 +163,46 @@ def set_value(widget: QWidget, value: Any) -> None:
             widget.setPlainText(str(value) if value is not None else "")
     elif isinstance(widget, QLineEdit):
         widget.setText(str(value) if value is not None else "")
+
+
+def completion_target(widget: QWidget) -> QLineEdit | None:
+    """Return the line edit a completer should attach to.
+
+    Args:
+        widget: A widget produced by build_widget().
+
+    Returns:
+        The widget itself for a plain QLineEdit, the inner line edit for a path
+        widget, or None when the widget cannot host a completer.
+    """
+    if isinstance(widget, _PathWidget):
+        return widget._edit
+    if isinstance(widget, QLineEdit):
+        return widget
+    return None
+
+
+def supports_completion(annotation: Any) -> bool:
+    """Report whether a parameter annotation maps to a completable widget.
+
+    Args:
+        annotation: The parameter's type annotation.
+
+    Returns:
+        True when the annotation builds a QLineEdit or a path widget.
+    """
+    ann = _unwrap_optional(annotation)
+    if ann is pathlib.Path:
+        return True
+    if ann is dict or get_origin(ann) is dict:
+        return False
+    if ann is list or get_origin(ann) is list:
+        return False
+    if ann in (bool, int, float):
+        return False
+    if isinstance(ann, type) and issubclass(ann, enum.Enum):
+        return False
+    return True
 
 
 def coerce_params(tool_info, raw: dict) -> tuple[dict, list[str]]:

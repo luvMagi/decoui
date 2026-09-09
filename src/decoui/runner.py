@@ -3,22 +3,53 @@ from __future__ import annotations
 
 import inspect
 import sys
+import traceback
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
-from .decorators import _TOOLSET_ATTR
+from .decorators import _TOOL_ATTR, _TOOLSET_ATTR
 from .registry import build_tree
 from .storage.db import init_db, set_db_path
 
 
-def gui_main(title: str = "decoui", db_path: str | Path | None = None) -> None:
+def gui_main(
+    title: str = "decoui",
+    db_path: str | Path | None = None,
+    on_startup: Callable[[], None] | None = None,
+) -> None:
     """Launch the decoui GUI application.
 
     Auto-discovers all @toolset classes visible in the caller's global scope.
+
+    Startup runs in a fixed order, so anything loaded early is available later:
+
+      1. ``db_path`` is applied and the database is initialised
+      2. the toolset tree is built and validated
+      3. ``on_startup()`` runs                     <- application hook
+      4. every toolset class is instantiated       <- ``self`` exists from here
+      5. each instance's own ``on_startup()`` method runs, if it defines one
+      6. the window is shown and the event loop starts
+
+    Failures in steps 3-5 do not stop the application: they are collected and
+    reported in one dialog over the main window, and everything that did load
+    stays usable.
+
+    Both hooks run on the GUI thread before the event loop starts. See
+    docs/startup-lifecycle.md for what that rules out.
 
     Args:
         title:   Window title.
         db_path: Path to the SQLite history and settings database. Defaults to
             ~/.decoui/history.db.
+        on_startup: Called once at step 3, for application-wide work: opening a
+            shared connection, fetching a token, warming a cache. It runs
+            before any toolset instance exists, so it cannot write to ``self``
+            -- to load data a single toolset owns, give that class its own
+            ``on_startup()`` method instead.
+
+    Raises:
+        RuntimeError: If no @toolset class is visible in the calling namespace.
     """
     if db_path is not None:
         set_db_path(Path(db_path))
@@ -49,11 +80,176 @@ def gui_main(title: str = "decoui", db_path: str | Path | None = None) -> None:
     init_db()
     tree = build_tree(*toolset_classes)
 
+    # Startup hooks run here, before show(): whatever they cost is time the
+    # user spends looking at nothing. Nothing below starts the event loop, so
+    # neither hook may wait on a timer or a worker thread.
+    problems = _run_startup_hook(on_startup)
+    instances, init_problems = _create_instances(tree)
+    problems += init_problems
+    problems += _run_toolset_hooks(instances)
+
+    # Toolsets that failed to construct have no instance to build pages from.
+    tree = [ts for ts in tree if ts.cls in instances]
+
     from .ui.main_window import MainWindow
-    window = MainWindow(tree, title=title)
+    window = MainWindow(tree, title=title, instances=instances)
     window.show()
+    _show_startup_problems(problems, window)
 
     sys.exit(app.exec())
+
+
+@dataclass(frozen=True)
+class StartupProblem:
+    """One failure recorded while starting the application.
+
+    Attributes:
+        source: What failed, in user-facing terms.
+        summary: One-line reason, shown in the dialog body.
+        detail: Full traceback, shown behind the dialog's Details button.
+    """
+
+    source: str
+    summary: str
+    detail: str
+
+
+def _run_startup_hook(on_startup: Callable[[], None] | None) -> list[StartupProblem]:
+    """Run the application startup hook, if one was given.
+
+    Called at step 3: QApplication exists, the database is initialised, but no
+    toolset instance exists and the event loop has not started. Two consequences
+    the hook author has to live with, documented in docs/startup-lifecycle.md:
+
+      * No ``self`` to write to -- that is what ToolSet.on_startup() is for.
+      * No event loop -- timers do not fire and QThreadPool results never
+        arrive, so waiting on a background thread here deadlocks startup.
+
+    A failure is reported but never fatal: the rest of the application is still
+    usable, and a dialog is a better diagnosis than a window that refuses to
+    open.
+
+    Args:
+        on_startup: Zero-argument callable, or None.
+
+    Returns:
+        One problem if the hook raised, otherwise an empty list.
+    """
+    if on_startup is None:
+        return []
+    try:
+        on_startup()
+    except Exception as exc:
+        return [StartupProblem(
+            source=f"on_startup={_callable_name(on_startup)}",
+            summary=f"{type(exc).__name__}: {exc}",
+            detail=traceback.format_exc(),
+        )]
+    return []
+
+
+def _create_instances(tree: list) -> tuple[dict[type, object], list[StartupProblem]]:
+    """Instantiate every registered toolset class before the window appears.
+
+    Creating them eagerly makes ``__init__`` a reliable place to declare state:
+    it runs once, after on_startup, and always before the event loop starts.
+
+    A class whose ``__init__`` raises is skipped — there is no object to hang a
+    tool page on — but the other toolsets still load.
+
+    Args:
+        tree: The toolset tree returned by build_tree().
+
+    Returns:
+        A mapping of toolset class to its shared instance, and the failures.
+    """
+    instances: dict[type, object] = {}
+    problems: list[StartupProblem] = []
+    for toolset_info in tree:
+        try:
+            instances[toolset_info.cls] = toolset_info.cls()
+        except Exception as exc:
+            problems.append(StartupProblem(
+                source=f"@toolset('{toolset_info.label}')",
+                summary=f"{toolset_info.cls.__name__}.__init__ raised "
+                        f"{type(exc).__name__}: {exc}",
+                detail=traceback.format_exc(),
+            ))
+    return instances, problems
+
+
+def _run_toolset_hooks(instances: dict[type, object]) -> list[StartupProblem]:
+    """Call ``on_startup()`` on every toolset instance that defines one.
+
+    Called at step 5, after construction and after the application hook, so a
+    toolset can declare its attributes in ``__init__`` and fill them here. A
+    failure leaves the instance in place with whatever ``__init__`` declared, so
+    its tools still open with fallback values -- which is the whole reason to
+    keep ``__init__`` trivial.
+
+    Order between toolsets follows build_tree()'s alphabetical sort and must not
+    be relied on; cross-toolset setup belongs in the application hook.
+
+    Args:
+        instances: Toolset instances created by _create_instances().
+
+    Returns:
+        One problem per hook that raised.
+    """
+    problems: list[StartupProblem] = []
+    for cls, instance in instances.items():
+        hook = getattr(instance, "on_startup", None)
+        if not callable(hook) or hasattr(hook, _TOOL_ATTR):
+            continue
+        try:
+            hook()
+        except Exception as exc:
+            problems.append(StartupProblem(
+                source=f"{cls.__name__}.on_startup()",
+                summary=f"{type(exc).__name__}: {exc}",
+                detail=traceback.format_exc(),
+            ))
+    return problems
+
+
+def _show_startup_problems(problems: list[StartupProblem], parent=None) -> None:
+    """Report startup failures in a modal dialog over the main window.
+
+    Args:
+        problems: Failures collected during startup; nothing is shown if empty.
+        parent: Widget the dialog is modal to.
+    """
+    if not problems:
+        return
+
+    from PySide6.QtWidgets import QMessageBox
+
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Icon.Warning)
+    box.setWindowTitle("Startup problems")
+    box.setText(
+        f"{len(problems)} startup step(s) failed.\n"
+        f"The application is running without them."
+    )
+    box.setInformativeText(
+        "\n".join(f"• {problem.source}\n    {problem.summary}" for problem in problems)
+    )
+    box.setDetailedText(
+        "\n\n".join(f"--- {problem.source} ---\n{problem.detail}" for problem in problems)
+    )
+    box.exec()
+
+
+def _callable_name(target: Callable) -> str:
+    """Return a readable name for a callback, for use in error messages.
+
+    Args:
+        target: Any callable.
+
+    Returns:
+        Its qualified name, or its repr when it has none.
+    """
+    return getattr(target, "__qualname__", None) or repr(target)
 
 
 _APP_STYLESHEET = """

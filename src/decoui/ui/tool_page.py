@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+import traceback
 from typing import Any
 
 from PySide6.QtCore import (
@@ -24,9 +25,23 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..assist import (
+    AssistRunner,
+    CascadeController,
+    CompletionController,
+    apply_defaults,
+    read_form,
+    resolve_defaults,
+)
 from ..engine.executor import ExecutionEngine
 from ..registry import ToolInfo
-from ..widget_builder import build_widget, coerce_params, get_value, set_value
+from ..widget_builder import (
+    build_widget,
+    coerce_params,
+    completion_target,
+    get_value,
+    set_value,
+)
 from .log_window import LogEntry, LogWindow
 
 _LEVEL_COLORS = {
@@ -49,7 +64,7 @@ _STATUS_STYLES = {
 class ToolPage(QWidget):
     history_requested = Signal(str)   # emits tool_id
 
-    def __init__(self, tool_info: ToolInfo, instance, parent=None):
+    def __init__(self, tool_info: ToolInfo, instance, parent=None, assist_runner=None):
         super().__init__(parent)
         self._tool = tool_info
         self._instance = instance
@@ -58,8 +73,13 @@ class ToolPage(QWidget):
         self._widgets: dict[str, QWidget] = {}
         self._log_records: list[LogEntry] = []
         self._open_log_windows: list = []
+        self._assist_runner = assist_runner or AssistRunner()
+        self._completions: dict[str, CompletionController] = {}
+        self._cascade: CascadeController | None = None
 
         self._build_ui()
+        self._apply_defaults()
+        self._setup_assist()
         self._engine.log_line.connect(self._append_log)
         self._engine.finished.connect(self._on_finished)
 
@@ -179,6 +199,89 @@ class ToolPage(QWidget):
         )
         root.addWidget(self._console)
 
+    # ── Form assist ───────────────────────────────────────────────────────────
+
+    def _apply_defaults(self) -> None:
+        """Fill the form from the tool's `defaults` spec.
+
+        Evaluated here rather than at import time, so the callback can read data
+        that only becomes available once the application has started.
+        """
+        if not self._tool.defaults:
+            return
+        try:
+            values = resolve_defaults(self._tool.defaults, self._instance, self._read_form())
+        except Exception:
+            self._append_log("WARNING", f"defaults failed:\n{traceback.format_exc()}")
+            return
+
+        for problem in apply_defaults(self._widgets, values):
+            self._append_log("WARNING", f"defaults could not apply {problem}")
+
+    def _setup_assist(self) -> None:
+        """Attach completion popups and cascading fill handlers to the form."""
+        if not self._tool.completions and not self._tool.cascade:
+            return
+
+        for name, spec in self._tool.completions.items():
+            widget = self._widgets.get(name)
+            target = completion_target(widget) if widget is not None else None
+            if target is None:
+                continue  # Rejected by validate_assist_config; guard anyway.
+            controller = CompletionController(
+                param_name=name,
+                line_edit=target,
+                spec=spec,
+                instance=self._instance,
+                form_reader=self._read_form,
+                debounce_ms=self._tool.completion_debounce_ms,
+                runner=self._assist_runner,
+                parent=self,
+            )
+            controller.failed.connect(self._on_assist_warning)
+            self._completions[name] = controller
+
+        self._cascade = CascadeController(
+            tool_info=self._tool,
+            widgets=self._widgets,
+            instance=self._instance,
+            runner=self._assist_runner,
+            parent=self,
+        )
+        self._cascade.failed.connect(self._on_assist_warning)
+        self._cascade.committed.connect(self._on_param_committed)
+
+        for controller in self._completions.values():
+            controller.candidate_chosen.connect(self._cascade.notify_commit)
+
+    def _read_form(self) -> dict[str, Any]:
+        """Return a snapshot of every parameter's current widget value."""
+        return read_form(self._widgets)
+
+    def _on_param_committed(self, _name: str) -> None:
+        """Drop cached candidates, since the form snapshot they used is stale."""
+        for controller in self._completions.values():
+            controller.invalidate_cache()
+
+    def _on_assist_warning(self, message: str) -> None:
+        """Show an assist failure in the output console.
+
+        Args:
+            message: Human-readable warning text.
+        """
+        self._append_log("WARNING", message)
+
+    def _set_assist_suspended(self, suspended: bool) -> None:
+        """Enable or disable all assist lookups for this page.
+
+        Args:
+            suspended: True while the tool runs or a bulk restore is in progress.
+        """
+        for controller in self._completions.values():
+            controller.set_suspended(suspended)
+        if self._cascade is not None:
+            self._cascade.set_suspended(suspended)
+
     # ── Animation ─────────────────────────────────────────────────────────────
 
     def _collapse_params(self):
@@ -288,12 +391,21 @@ class ToolPage(QWidget):
 
     def _set_params_readonly(self, readonly: bool):
         self._param_panel.setEnabled(not readonly)
+        self._set_assist_suspended(readonly)
 
     def restore_params(self, param_map: dict[str, Any]):
-        for name, value in param_map.items():
-            if name in self._widgets:
-                try:
-                    set_value(self._widgets[name], value)
-                except Exception:
-                    pass
+        # Cascades stay suspended for the whole restore: recomputing derived
+        # fields here would overwrite the very values being replayed.
+        self._set_assist_suspended(True)
+        try:
+            for name, value in param_map.items():
+                if name in self._widgets:
+                    try:
+                        set_value(self._widgets[name], value)
+                    except Exception:
+                        pass
+        finally:
+            if self._cascade is not None:
+                self._cascade.sync_values()
+            self._set_assist_suspended(False)
         self._expand_params()

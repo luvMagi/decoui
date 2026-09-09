@@ -28,12 +28,19 @@ _DEFAULT_SIDEBAR_WIDTH = 220
 class MainWindow(QMainWindow):
     """Host navigation, persistent layout state, and parallel tool tabs."""
 
-    def __init__(self, tree: list[ToolSetInfo], title: str = "decoui") -> None:
+    def __init__(
+        self,
+        tree: list[ToolSetInfo],
+        title: str = "decoui",
+        instances: dict[type, object] | None = None,
+    ) -> None:
         """Build the main application window.
 
         Args:
             tree: Registered toolsets and tools displayed in the sidebar.
             title: Application-specific suffix for the window title.
+            instances: Toolset instances created during startup. Classes absent
+                from the map are instantiated on first use.
         """
         super().__init__()
         self.setWindowTitle(f"decoui — {title}")
@@ -41,7 +48,7 @@ class MainWindow(QMainWindow):
 
         self._tree = tree
         self._tool_pages: dict[str, ToolPage] = {}
-        self._instances: dict[type, object] = {}
+        self._instances: dict[type, object] = dict(instances or {})
 
         # Collect all tags
         all_tags: list[str] = sorted({
