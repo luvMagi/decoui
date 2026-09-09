@@ -69,7 +69,7 @@ decoui/
 | Module | Responsibility |
 |---|---|
 | `decorators.py` | `@toolset` and `@tool` decorators |
-| `registry.py` | Scan annotations with `get_type_hints()`, build ToolTree |
+| `registry.py` | Scan annotations with `get_type_hints()`, split `Annotated` metadata, build ToolTree |
 | `widget_builder.py` | Map type annotations to PySide6 widgets; `_DictTextEdit` marker subclass |
 | `engine/worker.py` | `QRunnable` with `sys.stdout` redirect and `logging.Handler` attachment |
 | `engine/executor.py` | Schedule runs; `ExecutionRecord` lifecycle; log batch writing |
@@ -124,6 +124,7 @@ def merge(self, files: list, output: str = "out.csv") -> str:
 | `label` | `str` | required | Tool display name. |
 | `description` | `str` | `""` | Shown in a rounded-border box below the title. |
 | `placeholders` | `dict[str,str]` | `{}` | Placeholder text for named parameters. |
+| `labels` | `dict[str,str]` | `{}` | Form label for named parameters. Defaults to the parameter name. |
 | `confirm` | `bool` | `False` | Show Yes/No dialog before executing. |
 | `timeout` | `int\|None` | `None` | Execution timeout in seconds. |
 
@@ -161,6 +162,14 @@ Before calling the tool method, `coerce_params()` casts widget values to their d
 ### Annotation evaluation
 
 `typing.get_type_hints(method)` is used (not `method.__annotations__`) to correctly evaluate stringified annotations under PEP 563 / Python 3.14 lazy evaluation.
+
+`registry._resolve_hints()` runs that call twice: once stripped, and once with `include_extras=True`. The stripped pass is what `ParamInfo.annotation` stores, so widget selection and value coercion keep seeing bare runtime types at any nesting depth — `Optional[Annotated[Path, F(...)]]` still arrives as `Path | None`. The `include_extras` pass is read only by `_find_field_meta()`, which walks the annotation tree for the first `F` instance and feeds `ParamInfo.label` / `ParamInfo.placeholder`.
+
+Keeping the two passes separate is what makes `Annotated` support purely additive: nothing downstream of the registry ever sees an `Annotated` object, so no type-mapping table needed changing.
+
+Non-`F` metadata is ignored, so pre-existing aliases such as `Age = Annotated[int, {"min": 0, "max": 150}]` behave exactly as before.
+
+When annotations cannot be resolved (an alias only imported under `TYPE_CHECKING`), both passes fail together and the registry falls back to the raw `__annotations__` strings. Field metadata is unavailable on that path, matching the pre-existing loss of type mapping.
 
 ---
 
@@ -300,7 +309,7 @@ On finished:
 
 | Source / Level | Console Colour |
 |---|---|
-| `print` / stdout | Phosphor Green `#39FF14` |
+| `print` / stdout | White `#FFFFFF` |
 | `logging.DEBUG` | Gray `#A0A0A0` |
 | `logging.INFO` | Phosphor Green `#39FF14` |
 | `logging.WARNING` | Yellow `#FFD700` |
@@ -503,7 +512,7 @@ if __name__ == "__main__":
 
 | Area | Technology |
 |---|---|
-| GUI framework | PySide6 (Qt 6.6+) |
+| GUI framework | `PySide6-Essentials` (Qt 6.6+) — only `QtCore` / `QtGui` / `QtWidgets` / `QtTest` are imported, so `PySide6-Addons` is not a dependency |
 | Persistence | SQLite via stdlib `sqlite3`, WAL mode |
 | Packaging | `pyproject.toml` + `uv` / `pip`; icon bundled via `force-include` |
 | Type introspection | `inspect`, `typing.get_type_hints`, `get_args`, `get_origin` |

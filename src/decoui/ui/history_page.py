@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QMenu,
+    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -18,7 +19,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..storage.db import delete_records, query_logs, query_params, query_records
+from ..storage.db import (
+    clear_all_records,
+    delete_records,
+    get_db_size,
+    query_logs,
+    query_params,
+    query_records,
+)
 from ..storage.models import ExecutionRecord
 from .log_window import LogWindow
 
@@ -28,6 +36,16 @@ _COL_TOOL  = 2
 _COL_STAT  = 3
 _COL_DUR   = 4
 _COL_RES   = 5
+
+
+def _format_size(num_bytes: int) -> str:
+    """Render a byte count as a short human-readable string."""
+    size = float(num_bytes)
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} GB"
 
 
 class HistoryPage(QWidget):
@@ -67,11 +85,20 @@ class HistoryPage(QWidget):
         refresh_btn = QPushButton("🔄 Refresh", self)
         refresh_btn.clicked.connect(self.refresh)
 
+        self._db_size_label = QLabel("", self)
+        self._db_size_label.setToolTip("On-disk size of the execution history database")
+
+        self._clear_db_btn = QPushButton("🧹 Clear History", self)
+        self._clear_db_btn.setToolTip("Delete every execution record and reclaim disk space")
+        self._clear_db_btn.clicked.connect(self._clear_database)
+
         filter_row.addWidget(QLabel("Filter:", self))
         filter_row.addWidget(self._tool_filter)
         filter_row.addWidget(self._status_filter)
         filter_row.addWidget(self._range_filter)
         filter_row.addStretch()
+        filter_row.addWidget(self._db_size_label)
+        filter_row.addWidget(self._clear_db_btn)
         filter_row.addWidget(refresh_btn)
         layout.addLayout(filter_row)
 
@@ -173,6 +200,30 @@ class HistoryPage(QWidget):
 
         self._detail.setVisible(False)
         self._update_delete_btn()
+        self._update_db_size()
+
+    # ── Database size ─────────────────────────────────────────────────────────
+
+    def _update_db_size(self) -> None:
+        """Refresh the size readout from the database's current disk usage."""
+        size = get_db_size()
+        self._db_size_label.setText(f"DB: {_format_size(size)}")
+        self._clear_db_btn.setEnabled(size > 0)
+
+    def _clear_database(self) -> None:
+        """Drop every execution record after the user confirms."""
+        answer = QMessageBox.warning(
+            self,
+            "Clear History",
+            "Delete all execution records, parameters and logs?\n"
+            "This cannot be undone. Application settings are kept.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        clear_all_records()
+        self.refresh()
 
     # ── Checkbox helpers ──────────────────────────────────────────────────────
 

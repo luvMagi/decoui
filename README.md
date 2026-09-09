@@ -26,7 +26,32 @@ Decorator-driven GUI framework for Python. Annotate your methods — decoui gene
 pip install decoui
 ```
 
-Requires Python 3.10+ and PySide6 6.6+.
+Requires Python 3.10+.
+
+decoui depends on **`PySide6-Essentials`** (6.6+), not the full `PySide6` metapackage.
+It only ever imports `QtCore`, `QtGui`, `QtWidgets` and `QtTest`, all of which live in
+Essentials — so the extra `PySide6-Addons` payload (Charts, Multimedia, WebEngine,
+Qt3D, …) is skipped. Measured on Windows / PySide6 6.11: **637 MB → 202 MB**.
+
+If your own tool methods need an Addons module, depend on it explicitly:
+
+```bash
+pip install decoui PySide6-Addons   # or simply: pip install decoui PySide6
+```
+
+Both coexist with decoui — `PySide6` is just `PySide6-Essentials` + `PySide6-Addons`.
+
+> **Upgrading an existing environment** — all three distributions unpack into the same
+> `PySide6/` directory, so uninstalling `PySide6` / `PySide6-Addons` also deletes shared
+> libraries that Essentials still needs, leaving `ImportError: DLL load failed while
+> importing QtWidgets`. Force a clean reinstall rather than relying on the uninstall:
+>
+> ```bash
+> pip install --force-reinstall PySide6-Essentials
+> # uv: uv sync --reinstall-package pyside6-essentials
+> ```
+>
+> Fresh installs are unaffected.
 
 ---
 
@@ -98,6 +123,7 @@ def merge(self, files: list, output: str = "out.txt") -> str:
 | `label` | `str` | required | Tool display name. |
 | `description` | `str` | `""` | Shown in a bordered box below the title. |
 | `placeholders` | `dict[str,str]` | `{}` | Placeholder text per parameter name. |
+| `labels` | `dict[str,str]` | `{}` | Form label per parameter name. Defaults to the parameter name. |
 | `confirm` | `bool` | `False` | Show a Yes/No confirmation dialog before running. |
 | `timeout` | `int\|None` | `None` | Execution timeout in seconds. |
 | `completions` | `dict[str,list\|callable\|str]` | `{}` | Autocomplete candidates per parameter. See [Form Assist](#form-assist). |
@@ -203,7 +229,45 @@ The one exception is step 4: a class whose `__init__` raises produces no object,
 
 - Required parameters (no default) are marked with a red `*` in the form label.
 - `Optional[X]` is unwrapped to `X`.
+- `Annotated[X, ...]` maps on `X`; the metadata does not affect widget choice.
 - Default values are pre-filled into widgets automatically.
+
+### Field metadata with `Annotated`
+
+`F` attaches a label and placeholder to the type itself, so a field shared across
+tools carries its wording with it instead of repeating it in every `@tool`:
+
+```python
+from pathlib import Path
+from typing import Annotated
+from decoui import F, tool, toolset
+
+DumpFile = Annotated[Path, F(label="Dump file", placeholder="Pick a .dump / .tar")]
+
+@toolset(label="Backup")
+class Backup:
+
+    @tool(label="Restore")
+    def restore(self, archive: DumpFile) -> None: ...
+
+    # One tool can reword the shared field; the decorator wins.
+    @tool(label="Verify", labels={"archive": "Archive to check"})
+    def verify(self, archive: DumpFile) -> None: ...
+```
+
+Resolution order for both label and placeholder:
+
+`@tool(labels=…)` / `@tool(placeholders=…)` → `Annotated[…, F(…)]` → parameter name (label) or empty (placeholder)
+
+Adding `F` to an annotation is purely additive: widget selection, required-field
+marking and value conversion all read the bare type underneath, so existing code
+keeps working unchanged.
+
+> **Note** — with `from __future__ import annotations`, annotations are strings at
+> runtime and decoui resolves them with `typing.get_type_hints()`. An alias like
+> `DumpFile` must therefore be importable at runtime; putting the import under
+> `if TYPE_CHECKING:` makes resolution fail, and decoui falls back to the raw
+> strings, losing the `F` metadata along with the type mapping.
 
 ### `pathlib.Path` example
 
@@ -302,7 +366,7 @@ Tool methods can use `print()` and the standard `logging` module. Both are captu
 |---|---|
 | `print` / stdout | White |
 | `logging.DEBUG` | Gray |
-| `logging.INFO` | Cyan |
+| `logging.INFO` | Phosphor Green |
 | `logging.WARNING` | Yellow |
 | `logging.ERROR` | Red |
 | `logging.CRITICAL` | Bold Red |
@@ -334,6 +398,9 @@ Every run is stored in SQLite. The History panel (sidebar button) shows:
 - Click any row to see the parameter snapshot
 - **Replay Params** — restores that run's parameters to the tool's form
 - **View Full Log** — opens the full log in a resizable window with level filters and search
+- **DB size readout** — the current on-disk size of the history database, next to the filters
+- **Clear History** — drops every record, parameter, and log, then vacuums the database to reclaim
+  the space. Application settings are preserved.
 
 History is stored at `~/.decoui/history.db` by default. Override with `db_path` in `gui_main()`.
 

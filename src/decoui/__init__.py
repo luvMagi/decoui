@@ -2,16 +2,17 @@
 
 from .decorators import tool, toolset
 from .runner import gui_main
-from .types import Choice, DirPath, FilePath, Text
+from .types import Choice, DirPath, F, FilePath, Text
 
 __all__ = [
     "toolset",
     "tool",
     "gui_main",
+    "F",
     "Text",
     "FilePath",
     "DirPath",
     "Choice",
 ]
 
-__version__ = "0.2.0"
+__version__ = "0.2.2"

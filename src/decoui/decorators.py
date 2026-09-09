@@ -8,7 +8,7 @@ from .assist import DEFAULT_DEBOUNCE_MS
 _TOOLSET_ATTR = "__decoui_toolset__"
 _TOOL_ATTR = "__decoui_tool__"
 
-F = TypeVar("F", bound=Callable)
+_Fn = TypeVar("_Fn", bound=Callable)
 
 
 def toolset(
@@ -36,11 +36,12 @@ def tool(
     confirm: bool = False,
     timeout: int | None = None,
     placeholders: dict[str, str] | None = None,
+    labels: dict[str, str] | None = None,
     completions: dict[str, Any] | None = None,
     cascade: dict[str, Any] | None = None,
     defaults: Any = None,
     completion_debounce_ms: int = DEFAULT_DEBOUNCE_MS,
-) -> Callable[[F], F]:
+) -> Callable[[_Fn], _Fn]:
     """Method decorator that marks a method as a runnable tool.
 
     Args:
@@ -50,7 +51,11 @@ def tool(
         confirm: Show a Yes/No dialog before running.
         timeout: Execution timeout in seconds, or None for unlimited.
         placeholders: Per-parameter placeholder text,
-            e.g. ``{"name": "Enter your name..."}``.
+            e.g. ``{"name": "Enter your name..."}``. Overrides any placeholder
+            carried by an ``Annotated[..., F(...)]`` annotation.
+        labels: Per-parameter form label, e.g. ``{"archive": "Dump file"}``.
+            Overrides any label carried by an ``Annotated[..., F(...)]``
+            annotation. Falls back to the parameter name.
         completions: Per-parameter autocomplete source. Each value is a static
             list of candidates, a callable ``(text, form) -> Iterable[str]``, or
             the name of a method on the toolset class.
@@ -78,7 +83,7 @@ def tool(
         ``completions``, ``cascade`` and ``defaults`` alike.
         See docs/startup-lifecycle.md.
     """
-    def decorator(fn: F) -> F:
+    def decorator(fn: _Fn) -> _Fn:
         setattr(fn, _TOOL_ATTR, {
             "label": label,
             "description": description,
@@ -86,6 +91,7 @@ def tool(
             "confirm": confirm,
             "timeout": timeout,
             "placeholders": placeholders or {},
+            "labels": labels or {},
             "completions": completions or {},
             "cascade": cascade or {},
             "defaults": defaults,

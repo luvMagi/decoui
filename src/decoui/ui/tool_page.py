@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import time
 import traceback
+from html import escape
 from typing import Any
 
 from PySide6.QtCore import (
@@ -42,16 +43,7 @@ from ..widget_builder import (
     get_value,
     set_value,
 )
-from .log_window import LogEntry, LogWindow
-
-_LEVEL_COLORS = {
-    "stdout":   "#39FF14",
-    "DEBUG":    "#A0A0A0",
-    "INFO":     "#39FF14",
-    "WARNING":  "#FFD700",
-    "ERROR":    "#FF6B6B",
-    "CRITICAL": "#FF0000",
-}
+from .log_window import LEVEL_COLORS, LogEntry, LogWindow
 
 _STATUS_STYLES = {
     "running":   "color:#fff; background:#3b5bdb; border-radius:10px; padding:2px 10px;",
@@ -136,10 +128,13 @@ class ToolPage(QWidget):
         for param in self._tool.params:
             w = build_widget(param, self._param_panel)
             self._widgets[param.name] = w
+            # Labels may come from user metadata, so they are escaped before
+            # going into the rich text that draws the required-field marker.
+            text = escape(param.label or param.name)
             if not param.has_default:
-                lbl = QLabel(f'<span style="color:#e05252">*</span>{param.name}:', self._param_panel)
+                lbl = QLabel(f'<span style="color:#e05252">*</span>{text}:', self._param_panel)
             else:
-                lbl = QLabel(f'{param.name}:', self._param_panel)
+                lbl = QLabel(f'{text}:', self._param_panel)
             form_layout.addRow(lbl, w)
 
         root.addWidget(self._param_panel)
@@ -364,7 +359,7 @@ class ToolPage(QWidget):
     def _append_log(self, level: str, message: str):
         self._log_records.append(LogEntry(level, message))
 
-        color = _LEVEL_COLORS.get(level, "#FFFFFF")
+        color = LEVEL_COLORS.get(level, "#FFFFFF")
         fmt = QTextCharFormat()
         fmt.setForeground(QColor(color))
         if level == "CRITICAL":

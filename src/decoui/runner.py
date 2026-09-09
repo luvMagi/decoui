@@ -311,6 +311,20 @@ QTabBar::tab:selected {
     background-color: #ffffff;
     color: #3b5bdb;
 }
+/* Close affordance installed by MainWindow; Qt's built-in one is unusable here
+   because styling QTabBar::tab stops it being painted on the selected tab and
+   its position cannot be nudged in from the tab edge. */
+QToolButton#tabCloseButton {
+    background-color: transparent;
+    border: none;
+    border-radius: 3px;
+}
+QToolButton#tabCloseButton:hover {
+    background-color: #e4e7ef;
+}
+QToolButton#tabCloseButton:pressed {
+    background-color: #d0d5e0;
+}
 /* Buttons */
 QPushButton {
     background-color: #ffffff;
