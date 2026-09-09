@@ -4,16 +4,15 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QApplication, QPushButton
 
-from decoui.ui.log_window import LogEntry, LogWindow
-from decoui.ui.log_window import _LEVEL_COLORS as LOG_WINDOW_LEVEL_COLORS
-from decoui.ui.tool_page import _LEVEL_COLORS as TOOL_PAGE_LEVEL_COLORS
+from decoui.ui.log_window import LEVEL_COLORS, LogEntry, LogWindow
+from decoui.ui.tool_page import LEVEL_COLORS as TOOL_PAGE_LEVEL_COLORS
 
 
-def test_info_and_stdout_use_phosphor_green() -> None:
-    """Verify both log views use the same avionics-style green."""
-    for level_colors in (LOG_WINDOW_LEVEL_COLORS, TOOL_PAGE_LEVEL_COLORS):
-        assert level_colors["stdout"] == "#39FF14"
-        assert level_colors["INFO"] == "#39FF14"
+def test_stdout_is_distinct_from_info() -> None:
+    """Verify raw print output reads apart from INFO in both log views."""
+    assert TOOL_PAGE_LEVEL_COLORS is LEVEL_COLORS
+    assert LEVEL_COLORS["stdout"] == "#FFFFFF"
+    assert LEVEL_COLORS["INFO"] == "#39FF14"
 
 
 def test_none_button_clears_all_level_filters(qt_app: QApplication) -> None:

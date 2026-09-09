@@ -217,3 +217,40 @@ def delete_records(record_ids: list[int]) -> None:
     placeholders = ",".join("?" * len(record_ids))
     with _conn() as con:
         con.execute(f"DELETE FROM execution_record WHERE id IN ({placeholders})", record_ids)
+
+
+def get_db_size() -> int:
+    """Return the on-disk size of the history database in bytes.
+
+    The write-ahead log and shared-memory sidecar files are included, so the
+    number reflects the total disk footprint rather than the main file alone.
+
+    Returns:
+        Total size in bytes, or 0 when the database has not been created yet.
+    """
+    db = _DB_PATH
+    total = 0
+    for path in (db, db.with_name(db.name + "-wal"), db.with_name(db.name + "-shm")):
+        try:
+            total += path.stat().st_size
+        except OSError:
+            continue
+    return total
+
+
+def clear_all_records() -> None:
+    """Delete every execution record and reclaim the freed disk space.
+
+    Params and logs are removed through the foreign-key cascade. Application
+    settings are preserved. The database is checkpointed and vacuumed so the
+    size reported by :func:`get_db_size` actually shrinks.
+    """
+    with _conn() as con:
+        con.execute("DELETE FROM execution_record")
+
+    con = sqlite3.connect(str(_get_db_path()), isolation_level=None)
+    try:
+        con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        con.execute("VACUUM")
+    finally:
+        con.close()

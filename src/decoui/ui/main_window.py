@@ -1,19 +1,23 @@
 """Main window with persistent sidebar layout and tabbed tool pages."""
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, Qt, QTimer
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtCore import QPoint, QSize, Qt, QTimer
+from PySide6.QtGui import QCloseEvent, QIcon
 from PySide6.QtWidgets import (
+    QHBoxLayout,
     QMainWindow,
     QMenu,
     QPushButton,
     QSplitter,
     QStackedWidget,
+    QTabBar,
     QTabWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
+from ..assets import tab_close_icon_path
 from ..registry import ToolInfo, ToolSetInfo
 from ..storage.db import get_setting, set_setting
 from .history_page import HistoryPage
@@ -23,6 +27,13 @@ from .tool_page import ToolPage
 
 _SIDEBAR_WIDTH_SETTING = "ui.sidebar.width"
 _DEFAULT_SIDEBAR_WIDTH = 220
+
+_CLOSE_BUTTON_SIZE = 16
+_CLOSE_ICON_SIZE = 10
+#: Qt pins the tab's right-side widget to the tab rectangle's edge, which lands
+#: on top of the tab border. The holder carries this much right margin so the
+#: glyph is inset within the tab instead of straddling its boundary.
+_CLOSE_BUTTON_INSET = 7
 
 
 class MainWindow(QMainWindow):
@@ -112,8 +123,6 @@ class MainWindow(QMainWindow):
         self._tabs = QTabWidget(self._stack)
         self._tabs.setDocumentMode(True)
         self._tabs.setMovable(True)
-        self._tabs.setTabsClosable(True)
-        self._tabs.tabCloseRequested.connect(self._close_tool_tab)
         tab_bar = self._tabs.tabBar()
         tab_bar.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         tab_bar.customContextMenuRequested.connect(self._show_tab_context_menu)
@@ -160,8 +169,47 @@ class MainWindow(QMainWindow):
         if tab_index < 0:
             tab_index = self._tabs.addTab(page, tool_info.label)
             self._tabs.setTabToolTip(tab_index, tool_info.tool_id)
+            self._install_close_button(tab_index)
         self._tabs.setCurrentIndex(tab_index)
         self._stack.setCurrentWidget(self._tabs)
+
+    def _install_close_button(self, index: int) -> None:
+        """Attach a close button to a tab, inset from the tab's right edge.
+
+        Qt's own close button is not used: styling ``QTabBar::tab:selected``
+        suppresses its glyph on the active tab, and its position is fixed at
+        the tab boundary regardless of stylesheet padding or margins.
+        """
+        tab_bar = self._tabs.tabBar()
+        holder = QWidget(tab_bar)
+        holder.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        row = QHBoxLayout(holder)
+        row.setContentsMargins(0, 0, _CLOSE_BUTTON_INSET, 0)
+        row.setSpacing(0)
+
+        button = QToolButton(holder)
+        button.setObjectName("tabCloseButton")
+        button.setIcon(QIcon(str(tab_close_icon_path())))
+        button.setIconSize(QSize(_CLOSE_ICON_SIZE, _CLOSE_ICON_SIZE))
+        button.setFixedSize(_CLOSE_BUTTON_SIZE, _CLOSE_BUTTON_SIZE)
+        button.setToolTip("Close Tab")
+        button.setCursor(Qt.CursorShape.ArrowCursor)
+        button.clicked.connect(lambda: self._close_tab_holding(holder))
+        row.addWidget(button)
+
+        tab_bar.setTabButton(index, QTabBar.ButtonPosition.RightSide, holder)
+
+    def _close_tab_holding(self, holder: QWidget) -> None:
+        """Close the tab whose close button lives in the provided holder.
+
+        The index is resolved on click because tabs are movable and closable,
+        so an index captured at creation time goes stale.
+        """
+        tab_bar = self._tabs.tabBar()
+        for index in range(tab_bar.count()):
+            if tab_bar.tabButton(index, QTabBar.ButtonPosition.RightSide) is holder:
+                self._close_tool_tab(index)
+                return
 
     def _close_tool_tab(self, index: int) -> None:
         """Hide a tool tab while preserving its page and running task."""

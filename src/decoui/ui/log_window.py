@@ -20,14 +20,18 @@ LogEntry = namedtuple("LogEntry", ["level", "message"])
 
 _ALL_LEVELS = ["stdout", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
-_LEVEL_COLORS = {
-    "stdout":   "#39FF14",
+#: Foreground color per log level, shared by the live console and this viewer.
+#: ``stdout`` is plain white so raw ``print()`` output reads apart from INFO.
+LEVEL_COLORS = {
+    "stdout":   "#FFFFFF",
     "DEBUG":    "#A0A0A0",
     "INFO":     "#39FF14",
     "WARNING":  "#FFD700",
     "ERROR":    "#FF6B6B",
     "CRITICAL": "#FF0000",
 }
+
+_DEFAULT_COLOR = "#FFFFFF"
 
 
 class LogWindow(QMainWindow):
@@ -135,7 +139,7 @@ class LogWindow(QMainWindow):
             if query and query not in log.message.lower():
                 continue
             fmt = QTextCharFormat()
-            fmt.setForeground(QColor(_LEVEL_COLORS.get(log.level, "#FFFFFF")))
+            fmt.setForeground(QColor(LEVEL_COLORS.get(log.level, _DEFAULT_COLOR)))
             if log.level == "CRITICAL":
                 fmt.setFontWeight(700)
             cursor.insertText(log.message + "\n", fmt)
