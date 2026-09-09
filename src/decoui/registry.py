@@ -5,6 +5,7 @@ import inspect
 from dataclasses import dataclass, field
 from typing import Any
 
+from .assist import DEFAULT_DEBOUNCE_MS, validate_assist_config
 from .decorators import _TOOLSET_ATTR, _TOOL_ATTR
 
 
@@ -21,6 +22,10 @@ class ToolInfo:
     placeholders: dict[str, str]
     params: list[ParamInfo]
     return_annotation: Any
+    completions: dict[str, Any] = field(default_factory=dict)
+    cascade: dict[str, Any] = field(default_factory=dict)
+    defaults: Any = None
+    completion_debounce_ms: int = DEFAULT_DEBOUNCE_MS
 
 
 @dataclass
@@ -88,6 +93,18 @@ def build_tree(*toolset_classes) -> list[ToolSetInfo]:
 
             return_ann = hints.get("return", None)
 
+            completions = tool_meta.get("completions", {})
+            cascade = tool_meta.get("cascade", {})
+            defaults = tool_meta.get("defaults")
+            validate_assist_config(
+                tool_label=tool_meta["label"],
+                cls=cls,
+                params=params,
+                completions=completions,
+                cascade=cascade,
+                defaults=defaults,
+            )
+
             ts.tools.append(ToolInfo(
                 tool_id=f"{cls.__name__}.{name}",
                 method_name=name,
@@ -100,6 +117,12 @@ def build_tree(*toolset_classes) -> list[ToolSetInfo]:
                 placeholders=tool_meta["placeholders"],
                 params=params,
                 return_annotation=return_ann,
+                completions=completions,
+                cascade=cascade,
+                defaults=defaults,
+                completion_debounce_ms=tool_meta.get(
+                    "completion_debounce_ms", DEFAULT_DEBOUNCE_MS
+                ),
             ))
 
         ts.tools.sort(key=lambda t: t.label.casefold())
