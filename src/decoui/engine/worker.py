@@ -156,7 +156,9 @@ _thread_local = threading.local()
 
 # Progress calls can be far denser than the UI can repaint. Queued cross-thread
 # signals would pile up, so anything closer than this to the previous report is
-# dropped -- except the final one, which must never be lost.
+# dropped -- except one that completes a known total, which must never be lost.
+# With total == 0 there is no such thing to recognise, so an unbounded phase's
+# last message is droppable; see progress().
 _PROGRESS_MIN_INTERVAL_S = 0.1
 
 
@@ -173,6 +175,15 @@ def progress(done: int, total: int = 0, message: str = "") -> None:
             0 leaves the progress bar in its indeterminate state and updates
             only the message.
         message: Short status text shown next to the progress bar.
+
+    Note:
+        Reports are throttled to one per 100 ms, with one exception: a report
+        that completes a known total (``total > 0 and done >= total``) is always
+        delivered, so the bar reliably reaches 100%. There is no equivalent
+        guarantee when ``total`` is 0 -- with no total there is nothing to
+        recognise a final report by, so the last message of an unbounded phase
+        can be dropped if it lands inside the throttle window. Send it again, or
+        give the phase a total.
 
     Example:
         for index, table in enumerate(tables):

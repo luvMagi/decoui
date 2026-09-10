@@ -315,7 +315,7 @@ User clicks Stop (or timeout fires)
       │
       ▼  GUI thread
 ExecutionEngine.cancel()
-      ├── _run_cancel_hook()          ← tool's on_cancel, once per execution
+      ├── _run_cancel_hook()          ← tool's on_cancel, on every attempt
       │       └── errors → ERROR log line; cancellation continues
       └── ToolWorker.cancel()
               └── PyThreadState_SetAsyncExc(_WorkerCancelled)
@@ -337,9 +337,19 @@ Two consequences worth knowing:
   status, so a cancelled tool's `Popen.returncode` may stay `None` even though
   the child is reaped. Do not read a child's fate through `Popen` after a cancel.
 
-`_cancel_hook_fired` makes the hook once-per-execution (repeated Stop presses, or
-Stop racing the timeout), and `_on_finished` drops `_worker` so a timer that fires
-after the run ended cannot invoke cleanup for work that already completed.
+The hook fires on **every** cancellation attempt, not once per execution. This is
+deliberate: a Stop that arrives before the tool has assigned the state its hook
+reads does nothing, and the worker is still blocked in the call only the hook can
+release — a second Stop has to be able to retry. Idempotence is what makes that
+safe, which is why it is part of the hook's contract rather than an optimisation.
+
+What bounds the hook instead is the run's own lifetime. `cancel()` returns early
+when `_worker` is None, and `_on_finished` both drops `_worker` and stops the
+timeout timer, so nothing can invoke cleanup for work that already completed. The
+timeout timer is owned by the engine and re-armed per run, rather than a
+fire-and-forget `QTimer.singleShot`: a single-shot armed by a finished run cannot
+be recalled, and would cancel whichever run happened to be in flight when it
+eventually fired.
 
 ### 6.3 Progress
 
