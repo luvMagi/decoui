@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import difflib
 import json
 import re
 from pathlib import Path
@@ -22,83 +21,40 @@ from decoui.theme import (
     render_stylesheet,
 )
 from decoui.ui.tag_bar import _pill_style
-from decoui.ui.tool_page import _status_style
+from decoui.ui.tool_page import _STATUS_INK, _status_style
 
 RESOURCE_DIR = Path(__file__).parent / "resources"
 
-#: What token extraction itself cost: eight distinct corner radii were folded
-#: into five tokens, and two rules landed on a neighbouring value.
-_RADIUS_SNAPS = {
-    ("-", "    border-radius: 5px;"),
-    ("+", "    border-radius: 6px;"),
-    ("-", "    border-radius: 3px;"),
-    ("+", "    border-radius: 4px;"),
+#: The two declarations the pre-theme stylesheet had that the template
+#: deliberately dropped. The splitter's hairline became a wider hoverable grab
+#: area with the line drawn inside it, and the pane's `border-top` went with
+#: the switch to document mode, where the page draws that separator itself.
+DELIBERATE_REMOVALS = {
+    ("QSplitter::handle:horizontal", "width"),
+    ("QTabWidget::pane", "border-top"),
 }
 
-#: The theme's typography now reaches the stylesheet. Until this it was
-#: declared, validated and then dropped -- letter-spacing in particular had no
-#: effect at all, which is a large part of what a panel-styled theme needs.
-_TYPOGRAPHY = {
-    ("+", "    font-family: Microsoft YaHei, Meiryo, Segoe UI, sans-serif;"),
-    ("+", "    font-size: 10pt;"),
-    ("+", "    letter-spacing: 0px;"),
-}
 
-#: A deliberate change made after extraction, not a side effect of it: the
-#: splitter handle was painted as a hairline with nothing to aim at, so it now
-#: draws a thin line inside a wider, hoverable grab area.
-_SPLITTER_GRAB_AREA = {
-    ("-", "    background-color: #e4e7ef;"),
-    ("-", "    width: 1px;"),
-    ("+", "    background-color: #f5f6fa;"),
-    ("+", "    border-left: 1px solid #e4e7ef;"),
-    ("+", "}"),
-    ("+", "QSplitter::handle:horizontal:hover {"),
-    ("+", "    background-color: #dbe4ff;"),
-}
+def _rules(stylesheet: str) -> dict[str, set[str]]:
+    """Return each selector in a stylesheet and the properties it declares.
 
-#: The top row had no band of its own: it painted the same colour as the tab
-#: strip and the page, so it read as part of them rather than as a bar.
-_TOP_BAR_BAND = {
-    ("+", "/* Top bar */"),
-    ("+", "QWidget#tagBar {"),
-    ("+", "    background-color: #eef1f7;"),
-    ("+", "    border-bottom: 1px solid #d0d5e0;"),
-    ("+", "}"),
-}
+    Comments and values are both discarded: this is used to compare the shape
+    of two sheets, and a value is exactly what a theme is free to change.
 
-#: The tool list now names its own text colour instead of inheriting the
-#: window's. Identical to the inherited value in the light theme, and the only
-#: reason a theme can put a dark panel behind that list at all.
-_SIDEBAR_TEXT = {
-    ("+", "    color: #1e2128;"),
-}
+    Args:
+        stylesheet: QSS text.
 
-#: QTabWidget::pane's border was never rendered -- the tab widget runs in
-#: document mode, where Qt draws no pane frame. The rule was removed and the
-#: separator moved into ToolPage, which is the part of that boundary decoui
-#: actually controls.
-_TAB_SEPARATOR = {
-    ("-", "    border-top: 1px solid #e4e7ef;"),
-    ("-", "    background-color: #ffffff;"),
-    ("-", "}"),
-    ("+", "    background-color: #ffffff;"),
-    ("+", "}"),
-    ("+", "/* The tab widget runs in document mode, where Qt renders neither the pane"),
-    ("+", "   frame nor a border on the tab bar. The line separating the tab row from the"),
-    ("+", "   page is therefore drawn by the page itself -- see ToolPage._build_ui. */"),
-}
-
-#: Everything the current light theme may differ from the pre-theme stylesheet
-#: by. Anything else is drift and fails the test.
-EXPECTED_STYLESHEET_DIFF = (
-    _RADIUS_SNAPS
-    | _SPLITTER_GRAB_AREA
-    | _TOP_BAR_BAND
-    | _SIDEBAR_TEXT
-    | _TAB_SEPARATOR
-    | _TYPOGRAPHY
-)
+    Returns:
+        Selector to the set of property names it sets. A selector list is split
+        on commas, so ``"QSpinBox, QDoubleSpinBox"`` contributes two entries.
+    """
+    stylesheet = re.sub(r"/\*.*?\*/", "", stylesheet, flags=re.DOTALL)
+    rules: dict[str, set[str]] = {}
+    for selectors, body in re.findall(r"([^{}]+)\{([^{}]*)\}", stylesheet):
+        properties = set(re.findall(r"([a-z-]+)\s*:", body))
+        for selector in selectors.split(","):
+            rules.setdefault(" ".join(selector.split()), set()).update(properties)
+    return rules
 
 
 def _light() -> Theme:
@@ -159,29 +115,32 @@ def _write(tmp_path: Path, payload: Any, name: str = "theme.json") -> Path:
 
 # ── Rendering ─────────────────────────────────────────────────────────────────
 
-def test_light_reproduces_the_pre_theme_stylesheet() -> None:
-    """Verify the stylesheet only differs from v0.3.0 in documented ways.
+def test_the_template_still_styles_everything_the_pre_theme_sheet_did() -> None:
+    """Verify no rule was lost on the way from v0.3.0 to the token template.
 
-    The baseline is the stylesheet as it stood before themes existed. It is
-    kept as the historical reference rather than being regenerated, so this
-    test keeps proving that token extraction was faithful: any difference
-    beyond the folded radii and the one deliberate splitter change means a
-    colour was mapped to the wrong role or the template drifted.
+    The baseline is the stylesheet as it stood before themes existed. It used
+    to be compared line for line, which proved that token extraction was
+    faithful -- a one-time question, and one that has since been answered. What
+    it cannot keep proving is anything about colour: the built-in themes are
+    art-directed now, and pinning their values here would only turn this into a
+    hand-maintained changelog of deliberate edits.
+
+    So the comparison is structural. Additions are free -- a theme system exists
+    to add -- and every removal has to be one of the two that were meant.
     """
-    baseline = (RESOURCE_DIR / "stylesheet_light_baseline.qss").read_text(
-        encoding="utf-8"
+    baseline = _rules(
+        (RESOURCE_DIR / "stylesheet_light_baseline.qss").read_text(encoding="utf-8")
     )
 
-    rendered = render_stylesheet(_light())
+    rendered = _rules(render_stylesheet(_light()))
 
-    diff = {
-        (line[0], line[1:])
-        for line in difflib.unified_diff(
-            baseline.splitlines(), rendered.splitlines(), lineterm="", n=0
-        )
-        if line[:1] in "+-" and line[:3] not in ("---", "+++")
+    assert set(baseline) <= set(rendered), "a selector was dropped"
+    lost = {
+        (selector, prop)
+        for selector, props in baseline.items()
+        for prop in props - rendered.get(selector, set())
     }
-    assert diff == EXPECTED_STYLESHEET_DIFF
+    assert lost == DELIBERATE_REMOVALS
 
 
 def test_no_colour_literals_survive_in_the_stylesheet() -> None:
@@ -399,7 +358,7 @@ def test_status_badges_come_from_the_theme(status: str) -> None:
     style = _status_style(status)
     theme = active_theme()
 
-    assert theme.colors["text.on_accent"] in style
+    assert theme.colors[_STATUS_INK[status]] in style
     assert f"{theme.shape['shape.radius_pill']:g}px" in style
     assert any(colour in style for colour in theme.colors.values())
 

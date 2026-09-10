@@ -41,17 +41,22 @@ def themes_dir(tmp_path: Path) -> Iterator[Path]:
     set_active_theme(builtin_themes()["light"])
 
 
-def _add_theme(directory: Path, theme_id: str, name: str) -> None:
+def _add_theme(
+    directory: Path, theme_id: str, name: str, colors: dict[str, str] | None = None
+) -> None:
     """Write a minimal user theme into the directory.
 
     Args:
         directory: The theme directory.
         theme_id: Id for the new theme.
         name: Display name for the new theme.
+        colors: Tokens to override on top of light. Left empty the theme is a
+            pure rename, which renders the same stylesheet as light -- fine for
+            testing the picker, useless for testing that anything was restyled.
     """
     (directory / f"{theme_id}.json").write_text(json.dumps({
         "version": 1, "id": theme_id, "name": name,
-        "extends": "light", "colors": {},
+        "extends": "light", "colors": colors or {},
     }), encoding="utf-8")
 
 
@@ -83,11 +88,21 @@ def test_settings_button_is_reachable_without_any_tags(qt_app: QApplication) -> 
     bar.close()
 
 
-def test_settings_button_carries_no_inline_style(qt_app: QApplication) -> None:
-    """Verify the button inherits the theme instead of hard-coding a look."""
+def test_settings_button_hard_codes_no_colour(qt_app: QApplication) -> None:
+    """Verify the button takes its colours from the theme, not from itself.
+
+    It does carry a stylesheet: the application's generic QPushButton rule
+    spends 14px of padding either side, which is right for a word and leaves an
+    18px icon nothing, so the button asks for none. What it must never do is
+    name a colour -- that would be a second copy to keep in step with every
+    theme, and the one that got forgotten.
+    """
     bar = TagBar(["one"])
 
-    assert bar._settings_btn.styleSheet() == ""
+    sheet = bar._settings_btn.styleSheet()
+
+    assert "#" not in sheet, f"a colour literal leaked into the button: {sheet!r}"
+    assert "color" not in sheet, f"the button names a colour: {sheet!r}"
 
     bar.close()
 
@@ -236,20 +251,41 @@ def test_cancel_discards_the_selection(qt_app: QApplication, themes_dir: Path) -
     assert dialog.result() == QDialog.DialogCode.Rejected
 
 
-def test_accepting_does_not_restyle_the_running_application(
+def test_accepting_restyles_the_running_application(
     qt_app: QApplication, themes_dir: Path
 ) -> None:
-    """Verify the choice is recorded without touching the live window.
+    """Verify a new theme reaches the open windows, not only the database.
 
-    decoui themes a window as it is built; re-styling here would leave every
-    widget that set its own colours stale.
+    This is the v0.5.0 change: up to v0.4.0 the dialog recorded a choice and
+    said a restart was needed, because widgets that style themselves in code
+    would have been left stale. They are now told -- see decoui.ui.retheme.
     """
-    _add_theme(themes_dir, "brand", "Brand")
+    _add_theme(themes_dir, "brand", "Brand", colors={"bg.app": "#123456"})
     before = qt_app.styleSheet()
     dialog = SettingsDialog()
     dialog._combo.setCurrentIndex(dialog._combo.findData("brand"))
 
     dialog.accept()
 
-    assert qt_app.styleSheet() == before
+    assert active_theme().id == "brand"
+    assert qt_app.styleSheet() != before
+    assert "#123456" in qt_app.styleSheet()
+
+
+def test_accepting_the_running_theme_restyles_nothing(
+    qt_app: QApplication, themes_dir: Path
+) -> None:
+    """Verify pressing OK without changing the theme leaves the windows alone.
+
+    A re-theme rebuilds every console from its records, which costs the scroll
+    position. Paying that for a dialog the user only opened to read would be
+    a change they did not ask for.
+    """
+    _add_theme(themes_dir, "brand", "Brand", colors={"bg.app": "#123456"})
+    dialog = SettingsDialog()
+    before = qt_app.styleSheet()
+
+    dialog.accept()
+
     assert active_theme().id == "light"
+    assert qt_app.styleSheet() == before

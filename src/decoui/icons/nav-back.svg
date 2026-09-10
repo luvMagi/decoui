@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <!-- Filled, not stroked: at the size a toolbar gives it, an outlined
+       triangle closes up into a blob. Matches status-running.svg, which is the
+       same shape pointing the other way. -->
+  <path fill="currentColor" d="M16.4 3.6 L6.2 12 L16.4 20.4 Z"/>
+</svg>

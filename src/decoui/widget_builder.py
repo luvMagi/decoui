@@ -71,6 +71,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .i18n import t
+
 
 # ── Marker subclass to distinguish dict QTextEdit from list QTextEdit ─────────
 #
@@ -81,6 +83,13 @@ from PySide6.QtWidgets import (
 class _DictTextEdit(QTextEdit):
     """QTextEdit that reads back as a dict rather than a list of lines."""
 
+
+#: Floor for the two path-picker buttons. A minimum rather than a fixed width:
+#: pinning them clipped every label longer than "File..." -- Japanese needs
+#: 93px at the default size, and cockpit's capitals take "FOLDER..." to 110px.
+#: The floor clears both with room to spare, and at it the two buttons come out
+#: the same width, which is what makes them read as a pair.
+_PICKER_MIN_WIDTH = 112
 
 # ── Path widget: QLineEdit + file-picker + folder-picker ──────────────────────
 
@@ -109,28 +118,28 @@ class _PathWidget(QWidget):
         self._edit.editingFinished.connect(self.committed)
         layout.addWidget(self._edit)
 
-        self._file_btn = QPushButton("File...", self)
-        self._file_btn.setFixedWidth(72)
-        self._file_btn.setToolTip("Select a file")
+        self._file_btn = QPushButton(t("field.file_button"), self)
+        self._file_btn.setMinimumWidth(_PICKER_MIN_WIDTH)
+        self._file_btn.setToolTip(t("field.file_tooltip"))
         self._file_btn.clicked.connect(self._pick_file)
         layout.addWidget(self._file_btn)
 
-        self._dir_btn = QPushButton("Folder...", self)
-        self._dir_btn.setFixedWidth(72)
-        self._dir_btn.setToolTip("Select a folder")
+        self._dir_btn = QPushButton(t("field.folder_button"), self)
+        self._dir_btn.setMinimumWidth(_PICKER_MIN_WIDTH)
+        self._dir_btn.setToolTip(t("field.folder_tooltip"))
         self._dir_btn.clicked.connect(self._pick_dir)
         layout.addWidget(self._dir_btn)
 
     def _pick_file(self):
         """Open a file dialog and adopt the chosen path."""
-        path, _ = QFileDialog.getOpenFileName(self, "Select File", self._edit.text())
+        path, _ = QFileDialog.getOpenFileName(self, t("field.file_dialog"), self._edit.text())
         if path:
             self._edit.setText(path)
             self.committed.emit()
 
     def _pick_dir(self):
         """Open a directory dialog and adopt the chosen path."""
-        path = QFileDialog.getExistingDirectory(self, "Select Folder", self._edit.text())
+        path = QFileDialog.getExistingDirectory(self, t("field.folder_dialog"), self._edit.text())
         if path:
             self._edit.setText(path)
             self.committed.emit()
@@ -438,7 +447,7 @@ def _build_for_type(ann, default, parent) -> QWidget:
         w = _DictTextEdit(parent)
         w.setMinimumHeight(80)
         w.setMaximumHeight(200)
-        w.setPlaceholderText('{"key": "value"}')
+        w.setPlaceholderText(t("field.dict_placeholder"))
         if default is not inspect.Parameter.empty and isinstance(default, dict):
             w.setPlainText(json.dumps(default, ensure_ascii=False, indent=2))
         return w

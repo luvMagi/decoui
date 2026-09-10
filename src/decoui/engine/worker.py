@@ -22,6 +22,8 @@ Caveats that matter when writing tools
 * **The log handler is attached to the root logger**, so log records from every
   library in the process are captured too, not just the tool's own.
 * **Cancellation cannot interrupt a blocking call.** See :meth:`ToolWorker.cancel`.
+  A tool that shells out should use :func:`decoui.process.run_process`, which
+  registers the child here so that Stop kills it and the worker can return.
 * Tools run on ``QThreadPool.globalInstance()``, whose threads are reused. Never
   leave thread-local state behind.
 """
@@ -162,6 +164,21 @@ _thread_local = threading.local()
 _PROGRESS_MIN_INTERVAL_S = 0.1
 
 
+def current_worker():
+    """Return the worker running on this thread, if any.
+
+    Used by :func:`decoui.process.run_process` to register a child process
+    against the run that started it, so Stop can kill it.
+
+    Returns:
+        The :class:`ToolWorker` whose body is executing on this thread, or None
+        when called outside a decoui worker -- from a test, or from a tool
+        invoked directly. Callers must treat None as "no cancellation support",
+        not as an error.
+    """
+    return getattr(_thread_local, "worker", None)
+
+
 def progress(done: int, total: int = 0, message: str = "") -> None:
     """Report progress from inside a running tool.
 
@@ -228,6 +245,63 @@ class ToolWorker(QRunnable):
         self.timeout = timeout
         self.signals = WorkerSignals()
         self._cancelled = False
+        # Child processes started through decoui.process.run_process, and the
+        # ones this worker killed. Both are touched from two threads -- the
+        # worker registers, the GUI thread kills -- so both are behind a lock.
+        self._processes: list = []
+        self._killed: set[int] = set()
+        self._process_lock = threading.Lock()
+
+    def register_process(self, proc) -> None:
+        """Record a child process so that cancelling this run can kill it.
+
+        Args:
+            proc: The ``Popen`` to track. Registering a child that has already
+                been cancelled kills it immediately: Stop may have been pressed
+                between the process starting and this call.
+        """
+        with self._process_lock:
+            self._processes.append(proc)
+            already_cancelled = self._cancelled
+        if already_cancelled:
+            self._kill(proc)
+
+    def forget_process(self, proc) -> None:
+        """Stop tracking a child that has exited.
+
+        Args:
+            proc: The ``Popen`` to drop. Unknown children are ignored, so this
+                is safe to call from a ``finally`` that may run twice.
+        """
+        with self._process_lock:
+            if proc in self._processes:
+                self._processes.remove(proc)
+
+    def killed(self, proc) -> bool:
+        """Report whether this worker killed a particular child.
+
+        Args:
+            proc: The ``Popen`` to ask about.
+
+        Returns:
+            True when the child's exit status is decoui's doing rather than the
+            program's own. It is what stops a cancelled run being reported as a
+            command that failed.
+        """
+        with self._process_lock:
+            return id(proc) in self._killed
+
+    def _kill(self, proc) -> None:
+        """Kill one registered child and everything under it.
+
+        Args:
+            proc: The ``Popen`` to kill.
+        """
+        from ..process import _kill_tree_async
+
+        with self._process_lock:
+            self._killed.add(id(proc))
+        _kill_tree_async(proc)
 
     def cancel(self):
         """Ask the worker thread to stop by injecting an exception into it.
@@ -248,7 +322,16 @@ class ToolWorker(QRunnable):
         id yet, and the ``_cancelled`` flag makes run() report ``cancelled``
         once it finishes.
         """
-        self._cancelled = True
+        with self._process_lock:
+            self._cancelled = True
+            children = list(self._processes)
+        # Children first, and this is the whole reason cancelling a tool that
+        # shells out works at all: the worker is parked in a read on the child's
+        # pipe, where the injected exception below cannot be raised. Killing the
+        # child is what lets that read return.
+        for child in children:
+            self._kill(child)
+
         tid = getattr(self, "_thread_id", None)
         if tid is not None:
             ctypes.pythonapi.PyThreadState_SetAsyncExc(
@@ -276,6 +359,8 @@ class ToolWorker(QRunnable):
         # cleared in the finally below or the next tool reports to dead signals.
         _thread_local.signals = self.signals
         _thread_local.progress_at = 0.0
+        # run_process() looks this up to register its children against this run.
+        _thread_local.worker = self
 
         try:
             # Checked here rather than at decoration time so that @tool never
@@ -308,5 +393,6 @@ class ToolWorker(QRunnable):
             self.signals.error.emit(str(exc))
         finally:
             _thread_local.signals = None
+            _thread_local.worker = None
             sys.stdout = original_stdout
             root_logger.removeHandler(handler)

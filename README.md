@@ -16,7 +16,10 @@ Decorator-driven GUI framework for Python. Annotate your methods — decoui gene
 - **Parallel tool tabs** — keep multiple tool pages open and switch between running tasks
 - **Persistent layout** — sidebar width is restored from the application database
 - **Replay** — restore any past run's parameters with one click
-- **Light theme** — clean built-in stylesheet, Consolas / 微软雅黑 / Meiryo font stack
+- **Settings store** — `store("ns")[key] = value`, namespaced and persisted in the same database
+- **Help panel** — a reference built from the docstrings the tools already carry, with cross-references, tabs and back/forward
+- **Themes** — four built in, any number as JSON files; changed from Settings without a restart
+- **Translatable interface** — decoui's own text ships as one JSON catalogue per language
 
 ---
 
@@ -148,6 +151,7 @@ gui_main(title="My App", db_path="~/.myapp/history.db", on_startup=connect_backe
 | `toolsets` | `Sequence[type]\|None` | `None` | The `@toolset` classes to load. When omitted, every one visible in the calling namespace is discovered. |
 | `theme` | `str\|None` | `None` | Default theme id. A theme the user picked in Settings wins over it. See [Themes](#themes). |
 | `theme_dir` | `str\|Path\|None` | `~/.decoui/themes` | Directory scanned for user-supplied theme files. |
+| `language` | `str\|None` | `None` | Code for the language decoui's **own** interface is drawn in — Run, Stop, the history columns. A language the user picked in Settings wins over it. A tool's own label, description and docstring are never translated. Defaults to English. |
 
 By default `gui_main()` scans the caller's namespace, so a toolset has to be imported *and* look used:
 
@@ -397,6 +401,18 @@ Tool methods can use `print()` and the standard `logging` module. Both are captu
 
 Return values from tool methods are **not** displayed in the GUI. Use `logging` or `print` for any output you want users to see.
 
+### `run_process` — calling an external program
+
+```python
+from decoui import run_process
+
+result = run_process(["pg_dump", "-d", "app"], check=True)
+```
+
+Runs the program, streams its output into the console line by line, and lets
+Stop kill it — and everything it spawned — without the tool declaring anything.
+Plain `subprocess` does neither. See [Cancellation](#cancellation).
+
 ### Progress
 
 Long, quiet work looks indistinguishable from a hang. `progress()` drives the page's progress bar and the status text next to it:
@@ -439,54 +455,98 @@ Outside a running tool — when you instantiate the toolset and call the method 
 
 ## Cancellation
 
-**If your tool starts a subprocess, declare `on_cancel`.** Without it, pressing Stop leaves the child
-running.
+Stop is the hardest promise decoui makes, because Python cannot keep it on its own.
 
-Cancellation works by injecting an exception into the worker thread. That has two consequences most
-cleanup code gets wrong:
+Cancellation works by injecting an exception into the worker thread, and CPython raises it **at the
+next bytecode boundary**. A thread parked in a C call never reaches one. `proc.wait()`,
+`socket.recv()`, a long `time.sleep()` — the exception stays pending until that call returns by
+itself, and the tool's `finally` does not run either.
 
-**1. `except Exception` does not catch it.** The injected `_WorkerCancelled` derives from
-`BaseException`, so an ordinary handler lets it pass straight through.
+So whatever is holding the thread has to be released *from outside*. Everything below follows from
+that one fact.
 
-**2. `finally` does not save you either.** The injected exception is only raised at a Python bytecode
-boundary. A thread parked in `proc.wait()`, `socket.recv()` or any other C call does not reach one
-until that call returns on its own — so a `finally` block waiting to terminate the child does not run
-until the child has already finished. That is the entire problem: the child is exactly what needs to
-be stopped.
-
-`on_cancel` runs on the GUI thread, *before* the interrupt is injected, while the worker is still
-blocked. That is the only moment anything can reach the child:
+### If your tool shells out, use `run_process`
 
 ```python
+from decoui import run_process, tool, toolset
+
 @toolset(label="Database")
 class RestoreTools:
 
-    @tool(label="Restore", on_cancel="stop")
-    def restore(self, archive: Path) -> None:
-        self.proc = subprocess.Popen(["pg_restore", str(archive)], encoding="utf-8")
-        self.proc.wait()
-
-    def stop(self) -> None:
-        proc = getattr(self, "proc", None)
-        if proc is not None and proc.poll() is None:
-            proc.terminate()
+    @tool(label="Restore")
+    def restore(self, archive: Path) -> str:
+        result = run_process(["pg_restore", str(archive)])
+        if result.cancelled:
+            return "Stopped."
+        return f"pg_restore exited {result.returncode}."
 ```
 
-**3. The hook runs concurrently with your tool.** It is on the GUI thread while the tool body is
-still on the worker thread, so:
+No handle to keep, no `on_cancel` to declare. `run_process` registers the child with the running
+tool, so Stop kills it **and everything it spawned**.
 
-- keep it to idempotent interruption — `terminate()`, `close()`, `cancel()` — and do not touch state
-  the tool body is writing;
-- tolerate state that does not exist yet: Stop can be pressed before the tool assigns it, which is
-  why the example reads `getattr(self, "proc", None)`;
-- keep it fast. It blocks the GUI. Slow cleanup belongs in the tool's own `finally`.
+It also streams the child's output into the page console line by line, which plain `subprocess`
+cannot: decoui replaces `sys.stdout` with an object that has no `fileno()`, so a child left to
+inherit stdout writes past the console rather than into it.
+
+| | |
+|---|---|
+| `result.returncode` | the child's exit status |
+| `result.output` | everything it wrote, already printed |
+| `result.cancelled` | True only when decoui killed it |
+| `check=True` | raise `ProcessError` if the program fails — a *cancelled* run never raises, because that status is decoui's doing |
+| `shell=True` | refused: a shell is what leaves an unkillable grandchild behind. Pass a list |
+
+**`subprocess.run()` cannot be made stoppable**, with or without a hook — it keeps its handle to
+itself, so there is nothing for a hook to terminate. That is the shape a real incident had: Stop
+appeared to work and the dump kept running.
+
+> Measured, not assumed: every claim here is a test in
+> [tests/test_stop_external_process.py](tests/test_stop_external_process.py), driving the real engine
+> against a real child process. Full matrix in
+> [docs/cancelling-a-run.md](docs/cancelling-a-run.md).
+
+### If your tool blocks on something else, declare `on_cancel`
+
+For a socket read, a database driver, a lock — anything `run_process` cannot reach — the hook is
+still the only way. It runs on the GUI thread, *before* the interrupt is injected, while the worker
+is still blocked:
+
+```python
+@tool(label="Query", on_cancel="stop")
+def query(self) -> None:
+    self.conn = driver.connect(...)
+    self.conn.execute(long_query)
+
+def stop(self) -> None:
+    conn = getattr(self, "conn", None)
+    if conn is not None:
+        conn.cancel()
+```
+
+Three properties the hook must have:
+
+- **Idempotent.** A Stop that arrives before the tool has assigned the state the hook reads does
+  nothing, and a second Stop is the user's only way out of that — hence `getattr(self, "conn", None)`
+  rather than `self.conn`.
+- **Fast.** It blocks the GUI. Slow cleanup belongs in the tool's own `finally`.
+- **Concurrent with your tool.** It is on the GUI thread while the body is still on the worker
+  thread, so do not touch state the body is writing.
 
 A hook that raises is reported as an `ERROR` line in that run's log; cancellation still completes.
 
-**4. After cancellation the run is recorded as `cancelled` and the return value is dropped.** The
-`Popen` object is left unusable, too: the injection can land between `waitpid()` returning and
-`Popen` recording the status, so `proc.returncode` may stay `None` even though the child is gone.
-Check the child through the OS if you need its fate.
+### What else to know
+
+**`except Exception` does not catch it.** The injected `_WorkerCancelled` derives from
+`BaseException`, so an ordinary handler lets it pass straight through. That is deliberate — cleanup
+written as `except Exception` must not be able to swallow a cancellation and carry on.
+
+**A cancelled run is recorded as `cancelled`, never `success`,** and the return value is dropped. A
+tool that returns normally after Stop was pressed is still recorded as cancelled: the user asked for
+it to stop, and a partial result must not look like a whole one.
+
+**Do not trust `proc.returncode` after a cancellation** if you manage a child yourself. The injection
+can land between `waitpid()` returning and `Popen` recording the status, so it may stay `None` even
+though the child is gone. Ask the OS.
 
 `timeout=` uses this same path — from the tool's side a timeout and a Stop press are the same event.
 
@@ -547,11 +607,11 @@ The token groups:
 | Group | Count | Covers |
 |---|---|---|
 | `bg.*` | 21 | every surface separately -- app, page, top bar, tabs, sidebar, tool list, fields, buttons, table, console |
-| `text.*` | 14 | one ink per place text sits, including `text.on_sidebar` (a dark tool list), `text.on_topbar` (a dark top bar), and `text.on_success` / `on_danger` / `on_neutral` so a bright Run button can take dark text while Stop stays dark and takes light text |
-| `border.*` | 9 | panels, fields, buttons, tabs, focus, and the console's frame |
-| `console.*` | 6 | one colour per log level, so a light console is possible at all |
-| `accent` · `success` · `danger` · `neutral` · `scrollbar.*` | 9 | selections and the semantic fills |
-| `shape.*` | 8 | five corner radii, two border widths, and `border_style` -- Qt's `outset` / `inset` / `ridge` / `groove` draw a bevel from the border colour, which is as close to a raised panel as a flat format gets. Set the radii to `0` to square everything off. |
+| `text.*` | 16 | one ink per place text sits, including `text.on_sidebar` (a dark tool list), `text.on_topbar` (a dark top bar), and `text.on_running` / `on_success` / `on_danger` / `on_neutral` so a bright Run button can take dark text while Stop stays dark and takes light text |
+| `border.*` | 10 | panels, fields, buttons, tabs, the cap on the current tab, focus, and the console's frame |
+| `console.*` | 12 | a formatted line is inked in three parts -- `console.timestamp`, then `console.tag.<level>` for the level itself and `console.body.<level>` for the message. `console.plain` covers a line that carries no level at all, such as raw `print()` output. Set a level's tag and body to one value to tint the whole line |
+| `accent` · `running` · `success` · `danger` · `neutral` · `scrollbar.*` | 11 | selections and the semantic fills. `running` is separate from `accent` because `accent` also fills every checked button: a theme that wants its toggles and its Run button in one colour would otherwise get a Running badge identical to the Done one |
+| `shape.*` | 14 | six corner radii, and border widths and styles grouped the way the colours are -- `_panel` / `_control` / `_field`, plus `_emphasis` and `_focus` -- so a theme can bevel its buttons without bevelling its tables. Qt's `outset` / `inset` / `ridge` / `groove` draw a bevel from the border colour, which is as close to a raised panel as a flat format gets; `double` needs a width of at least 3 before two lines fit. Set the radii to `0` to square everything off. |
 | `font.*` | 8 | `family` / `size_pt` / `letter_spacing`, `mono_family` / `mono_size_pt` for the console, `title_size_px` / `small_size_pt` for headings and secondary controls, and `uppercase` to render tags, tabs and buttons in capitals |
 
 Font families are **stacks**: Qt falls through them in order, so end every one with
@@ -595,9 +655,215 @@ The gear button at the top right opens **Settings**, which lists every theme
 available -- built-in and user-supplied alike -- and starts on the one currently
 in effect.
 
-Themes are applied once, at startup, so a change takes effect the next time the
-application runs. Nothing about the open window changes when the dialog closes;
-that is why the dialog says so before you choose.
+A new theme is applied as soon as the dialog closes, to every window that is
+open. Nothing is rebuilt: a tool that is running goes on running, the forms keep
+what was typed into them, and output already printed is re-inked in the new
+colours. The one thing that is lost is the console's scroll position, which
+returns to the newest line.
+
+The **interface language**, chosen in the same dialog, is the exception: it
+takes effect on the next launch. Text is read as each widget is built, in far
+more places than colour is, and there is no equivalent of the application
+stylesheet to catch the rest. The dialog says which is which before you choose.
+
+---
+
+## Help Panel
+
+The **?** button in the top bar opens a reference for everything loaded in the
+session. Nothing has to be declared for it: a tool's page is built from the
+docstring the method already carries — its summary, the prose under it, and the
+`Args:`, `Returns:` and `Raises:` sections of Google style.
+
+Write the docstring for the person **using** the tool, not for the person
+reading the file. Notes about which annotation produces which widget belong in
+`#` comments above the method; comments are not collected, so the two audiences
+stay separated.
+
+Alongside the tools, the panel carries decoui's own guide — how history works,
+what Replay actually replays, how to change theme. That part ships with decoui
+and is translated with the rest of the interface.
+
+Each page opens in its own tab, the way the main window opens a tool, and the
+arrows above the tabs walk back and forward through the pages visited.
+
+### Writing help
+
+Docstrings and guide pages are Markdown: headings, fenced code blocks, tables,
+ordered and nested lists, blockquotes. Two departures, because the source is
+sometimes a Python docstring:
+
+- ` ``literals`` ` in double backticks are accepted alongside single, since that
+  is what reST — and therefore a Python docstring — uses;
+- indented code blocks are **not** recognised. A docstring's indentation is an
+  artefact of where it sits in the file. Fence code instead.
+
+**Cross-references have their own syntax, `[[key]]`,** deliberately not
+Markdown's link syntax:
+
+```
+[[MyTools.encode]]                one tool
+[[MyTools]]                       a whole toolset
+[[guide.themes]]                  one of decoui's own pages
+[[guide.themes|the theme page]]   with your own text
+```
+
+The target is a **key**, never a title or a file name:
+
+| Key | Page |
+|---|---|
+| `guide` | decoui's own contents page |
+| `guide.<slug>` | one of decoui's guide pages |
+| `ClassName` | a toolset |
+| `ClassName.method` | a tool |
+
+Keys do not change when a page is translated, so one written link works in every
+language. A reference that does not resolve — a tool the application did not
+load, a typo — renders as its own text with no link on it. Which tools exist is
+up to the application, so help cannot be written against a fixed set, and a dead
+link is worse than the sentence without it.
+
+Keeping references out of `[text](target)` is what lets that form mean what it
+means everywhere else: **`[text](https://…)` is an ordinary link** and opens in
+the reader's browser. Only `http`, `https` and `mailto` are followed.
+
+Link colour comes from the theme's `text.link` token.
+
+### Help in a file
+
+When a tool's help outgrows its docstring, or wants translating, point at a
+Markdown file:
+
+```python
+@tool(label="Deploy", help="doc/deploy.md")
+def deploy(self, service: str = "web") -> str:
+    ...
+```
+
+The path is relative to the module the toolset class is defined in, and decoui
+inserts a language directory into it — `doc/<language>/deploy.md`, falling back
+to `doc/en/deploy.md` and then `doc/deploy.md`.
+
+The file replaces the **prose** and nothing else: the summary, the parameter
+table and Returns still come from the docstring, because they describe the
+signature and a file beside the module cannot be checked against it.
+
+> Full reference: [docs/help-authoring.md](docs/help-authoring.md).
+
+### Translating your own tools
+
+decoui translates *its own* interface from catalogues it ships. The labels,
+descriptions and field text **you** write into `@toolset` and `@tool` are strings
+it has never seen, so they get a catalogue of your own:
+
+```python
+gui_main(toolsets=[...], i18n_dir="i18n")     # i18n/ja-JP.json, i18n/zh-CN.json
+```
+
+Keys are `ClassName` and `ClassName.method` — the same keys a cross-reference
+uses. Every field is optional; an absent key leaves the string your source wrote,
+so a half-finished catalogue gives a half-translated interface rather than a
+broken one.
+
+```json
+{
+  "OpsTools.restore": {
+    "label": "復元",
+    "brief": "アーカイブから復元します。",
+    "returns": "復元された内容。",
+    "params": { "archive": { "label": "アーカイブ", "brief": "読み込むアーカイブ。" } }
+  }
+}
+```
+
+This cannot be done in the decorator: its arguments are evaluated at **import**,
+before `gui_main()` settles the language. decoui substitutes later, in
+`build_tree()`, which is what reaches the sidebar, the tabs, the forms, the Help
+panel and the history all at once.
+
+decoui can write the starting point for you — a catalogue holding every
+translatable string your code declares, and a Markdown file per tool holding its
+prose. Both live behind a hidden switch, off in anything you ship.
+
+> Full reference, including how to turn that switch on:
+> [docs/translating-an-application.md](docs/translating-an-application.md).
+
+---
+
+## Remembering Things Between Runs
+
+A tool often has one thing worth keeping — the environment last deployed to,
+the folder last exported into, whether the verbose flag was on. `store()` gives
+you a namespaced key/value store, persisted in the same SQLite database as the
+run history.
+
+```python
+from decoui import store, tool, toolset
+
+@toolset(label="Deploy")
+class DeployTools:
+
+    def load_defaults(self) -> dict:
+        return {"env": store("deploy").get("last_env", "staging")}
+
+    @tool(label="Deploy Service", defaults="load_defaults")
+    def deploy(self, service: str, env: str) -> None:
+        """Deploy a service.
+
+        Args:
+            service: What to deploy.
+            env: Where to deploy it.
+        """
+        store("deploy")["last_env"] = env      # inserted if new, replaced if not
+```
+
+It behaves as a mapping:
+
+| | |
+|---|---|
+| `s[key] = value` / `s.set(key, value)` | write; there is nothing to register first |
+| `s[key]` | read, `KeyError` when absent |
+| `s.get(key, default)` | read with a fallback |
+| `del s[key]` / `s.delete(key)` | remove; removing what was never there is fine |
+| `key in s`, `len(s)`, `list(s)` | the usual |
+| `s.keys()`, `s.items()` | everything in this namespace, sorted |
+
+### The namespace
+
+`store("deploy")` and `store("deploy")` anywhere else in the application reach
+the same rows — that is how a setting shared by every tool is shared. Omit the
+name and you get `app`, for an application that only needs one.
+
+`ui` and `decoui` are refused: they hold the chosen theme, the interface
+language and the sidebar width. An application writing there would be changing
+the user's settings rather than its own.
+
+A namespace may not contain a dot, because the dot is what separates it from
+the key. Keys may contain anything.
+
+### Values
+
+Anything JSON can carry — `str`, `int`, `float`, `bool`, `None`, and lists and
+dicts of those — and it comes back as the type it went in as. A value JSON
+cannot carry raises `TypeError` where you wrote it, rather than being coerced
+to a string that fails somewhere else later.
+
+`None` is a stored value, not an absence: `key in store` still reports `True`.
+
+Tuples come back as lists. JSON has no tuple.
+
+### What it is not
+
+A settings store, not an application database: small values, one at a time, no
+queries and no relations. A tool with real data of its own should open its own
+file.
+
+Reads and writes go straight to the database — there is no cache — and every
+call opens and closes its own connection, so this is safe to use from a tool
+body, which runs on a worker thread.
+
+Clearing the run history does **not** clear these: `clear_all_records()` leaves
+the settings table alone.
 
 ---
 
@@ -621,7 +887,10 @@ History is stored at `~/.decoui/history.db` by default. Override with `db_path` 
 
 ## Example
 
-See [`src/decoui/example.py`](src/decoui/example.py) for a complete demo covering all supported widget types.
+See [`src/decoui/example/`](src/decoui/example) for a complete demo covering every
+supported feature, in three groups: [fields](src/decoui/example/fields.py),
+[running](src/decoui/example/running.py) and [form assist](src/decoui/example/assist.py).
+Run it with `python -m decoui.example`.
 
 Two tools there are worth reading as a pair before writing anything that runs for a while:
 

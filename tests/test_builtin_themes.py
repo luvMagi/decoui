@@ -41,11 +41,19 @@ CONTRAST_PAIRS = [
     ("text.on_danger", "danger.hover"),
     ("text.on_neutral", "neutral"),
     # Console output has to stay legible on whatever ground the theme gives it.
-    ("console.stdout", "bg.console"),
-    ("console.info", "bg.console"),
-    ("console.warning", "bg.console"),
-    ("console.error", "bg.console"),
-    ("console.debug", "bg.console"),
+    # Both inks of every level: the body carries the message and the tag is the
+    # thing being scanned for, so neither may sink into the background.
+    ("console.plain", "bg.console"),
+    ("console.tag.debug", "bg.console"),
+    ("console.body.debug", "bg.console"),
+    ("console.tag.info", "bg.console"),
+    ("console.body.info", "bg.console"),
+    ("console.tag.warning", "bg.console"),
+    ("console.body.warning", "bg.console"),
+    ("console.tag.error", "bg.console"),
+    ("console.body.error", "bg.console"),
+    ("console.tag.critical", "bg.console"),
+    ("console.body.critical", "bg.console"),
 ]
 
 #: WCAG AA for body text. Where the default theme already falls short of it,
@@ -190,7 +198,7 @@ def test_status_badges_stay_distinguishable(theme_id: str) -> None:
         theme_id: The theme under test.
     """
     colours = _themes()[theme_id].colors
-    fills = {colours[token] for token in ("accent", "success", "danger", "neutral")}
+    fills = {colours[token] for token in ("running", "success", "danger", "neutral")}
 
     assert len(fills) == 4
 

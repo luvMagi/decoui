@@ -1,6 +1,6 @@
 # Startup Lifecycle — Where to Load Data
 
-> Guide for tool authors · Applies to decoui `0.2.0`+ · theme step added in `0.4.0`
+> Guide for tool authors · Applies to decoui `0.2.0`+ · theme step added in `0.4.0` · language step added in `0.5.0`
 
 Reading initial values from a config file, a database, or a service is the common case, not an edge case. decoui gives you three places to do it and they are **not** interchangeable. This page says which one to use and what each guarantees.
 
@@ -20,17 +20,20 @@ If you only read one thing: **declare state in `__init__`, load it in `on_startu
  2  toolsets resolved           explicit list, or a scan of caller globals;
                                 @toolset CLASSES, not instances
  3  QApplication created        ← the app object exists from here
- 4  init_db()                   tables created; get_setting() usable
- 5  theme resolved + applied    stored choice > gui_main(theme=) > light;
+ 4  init_db()                   tables created; get_setting() and store() usable
+ 5  language applied            stored choice > gui_main(language=) > English.
+                                Before the theme: the theme's own failure dialog
+                                is written in the interface language
+ 6  theme resolved + applied    stored choice > gui_main(theme=) > light;
                                 a broken theme falls back, never stops startup
- 6  build_tree()                annotation scan + assist validation
- 7  on_startup()                ← APPLICATION hook
- 8  cls() for every toolset     ← `self` exists from here
- 9  ToolSet.on_startup()        ← PER-TOOLSET hook
-10  MainWindow built            sidebar only; no ToolPage yet
-11  window.show()               the window appears
-12  problem dialog, if any      theme problems are reported here too
-13  app.exec()                  ← the event loop starts
+ 7  build_tree()                annotation scan + assist validation
+ 8  on_startup()                ← APPLICATION hook
+ 9  cls() for every toolset     ← `self` exists from here
+10  ToolSet.on_startup()        ← PER-TOOLSET hook
+11  MainWindow built            sidebar only; no ToolPage yet
+12  window.show()               the window appears
+13  problem dialog, if any      theme problems are reported here too
+14  app.exec()                  ← the event loop starts
 
 ── later, when the user clicks a tool ──────────────────────
     ToolPage.__init__ → defaults / completions / cascade become live
@@ -109,7 +112,7 @@ class DeployTools:
     def on_startup(self) -> None:
         # Runs after connect(), before the window. May fail; see §5.
         self.services = _CLIENT.list_services()
-        self.config["env"] = get_setting("deploy.env", "staging")
+        self.config["env"] = store("deploy").get("env", "staging")
 
     @tool(
         label="Deploy",
@@ -117,7 +120,7 @@ class DeployTools:
         completions={"service": "search_services"},
     )
     def deploy(self, service: str = "", env: str = "") -> None:
-        set_setting("deploy.env", env)          # remember for next launch
+        store("deploy")["env"] = env            # remember for next launch
 
     def load_defaults(self) -> dict:
         return {"env": self.config["env"]}      # reads self at call time
@@ -168,17 +171,27 @@ Do not catch and swallow errors inside a hook just to keep the app quiet. Raisin
 
 ---
 
-## 5.1 Why the theme is resolved before anything is built
+## 5.1 Why the language and the theme come before anything is built
 
-The database comes first because the user's theme choice lives in it, and the
-theme is applied before the first widget exists because decoui never re-themes
-a running window -- widgets that style themselves in code read their colours as
-they are constructed, and a later swap would leave them stale. Changing theme
-therefore takes effect on the next launch.
+The database comes first because both choices live in it. The language is
+applied before the theme because the theme's own failure dialog is written in
+the interface language: by the time there is a problem to report, the language
+has to be settled.
+
+Both are applied before the first widget exists, because widgets read their
+text and the colours they set on themselves as they are constructed.
+
+They differ in what happens afterwards. **The theme can be changed in place**
+(since `0.5.0`): most colour lives in the application stylesheet, and the
+handful of widgets that ink themselves are told to redo it —
+`ui/retheme.py`. **The language cannot**: text is read at build time in far
+more places than colour is, and there is no equivalent of the stylesheet to
+catch what a walk would miss. Changing language still means restarting, and the
+settings dialog says which is which.
 
 A theme is presentation, so nothing about it is fatal: an unreadable file is
 skipped, an unresolvable selection falls back to the built-in light theme, and
-both are reported in the same dialog as hook failures at step 12.
+both are reported in the same dialog as hook failures at step 13.
 
 ---
 
@@ -192,7 +205,7 @@ both are reported in the same dialog as hook failures at step 12.
   logger filters everything below WARNING. A tool that calls `logging.info()`
   produces nothing until the application has called `logging.basicConfig()`.
 - **Eager instantiation is observable.** A toolset `__init__` with side effects (writing a file, printing) now runs at startup rather than on first click. This changed in `0.2.0`.
-- **`get_setting()` is safe in a hook, not in a signature default.** `init_db()` runs at step 4, before both hooks, but long after import time.
+- **`store()` is safe in a hook, not in a signature default.** `init_db()` runs at step 4, before both hooks, but long after import time.
 
 ---
 
@@ -204,6 +217,6 @@ both are reported in the same dialog as hook failures at step 12.
 | Use a value my module already read at import | Signature default |
 | Open a connection every toolset needs | `gui_main(on_startup=...)` |
 | Load a config file this toolset owns | `ToolSet.on_startup()` |
-| Remember what the user picked last time | `ToolSet.on_startup()` + `get_setting()`, write back with `set_setting()` in the tool body |
+| Remember what the user picked last time | `ToolSet.on_startup()` + `store("ns").get(...)`, write back with `store("ns")[key] = ...` in the tool body |
 | Recompute a form value every time the page opens | `@tool(defaults=...)` |
 | Fetch something slow | Neither — put it in the tool body, where it gets a thread and a Stop button |

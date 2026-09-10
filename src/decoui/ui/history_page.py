@@ -29,8 +29,57 @@ from ..storage.db import (
     query_params,
     query_records,
 )
+from ..i18n import active_language, t
 from ..storage.models import ExecutionRecord
+from .icons import ICON_PX, theme_icon
 from .log_window import LogWindow
+
+#: Icon and colour token per run status. The tokens are the semantic ones the
+#: theme already defines for buttons and badges, so a tick is the same green as
+#: a Run button and a theme that restyles one restyles the other. A status with
+#: no entry gets no icon rather than a stand-in glyph: the word is already in
+#: the cell, and an icon meaning "unknown" would be inventing information.
+_STATUS_ICONS: dict[str, tuple[str, str]] = {
+    "success": ("status-success", "success"),
+    "error": ("status-error", "danger"),
+    "running": ("status-running", "running"),
+    "cancelled": ("status-cancelled", "neutral"),
+}
+
+#: Languages whose readers mark a pass with something other than a tick, keyed
+#: by the status the substitution applies to.
+#:
+#: In Japan and Korea the mark for "correct" is a circle; a tick there reads
+#: closer to "this row is selected" than to "this run passed", which is the
+#: wrong thing for a column that is not selectable. The colour is unaffected --
+#: the circle is drawn from the same ``success`` token as the tick, so a theme
+#: restyles both at once.
+#:
+#: This lives in code rather than in the message catalogues on purpose: an icon
+#: name is not text, and the catalogues went back to holding only words when the
+#: glyphs came out of them.
+_LOCALISED_STATUS_ICONS: dict[str, dict[str, str]] = {
+    "ja-JP": {"success": "status-success-circle"},
+    "ko-KR": {"success": "status-success-circle"},
+}
+
+
+def _status_icon(status: str) -> tuple[str | None, str | None]:
+    """Return the icon name and colour token to mark one run status with.
+
+    Args:
+        status: The record's status, as stored.
+
+    Returns:
+        A ``(name, token)`` pair, or ``(None, None)`` for a status with no mark
+        of its own.
+    """
+    name, token = _STATUS_ICONS.get(status, (None, None))
+    if name is None:
+        return None, None
+    localised = _LOCALISED_STATUS_ICONS.get(active_language(), {})
+    return localised.get(status, name), token
+
 
 _COL_CHECK = 0
 _COL_TIME  = 1
@@ -100,14 +149,28 @@ class HistoryPage(QWidget):
         """
         container = QWidget(self)
         container.setLayout(row)
-        container.setStyleSheet("background: transparent;")
+        # Every selector here names exactly one widget by id. A stylesheet set
+        # on a widget reaches its whole subtree, and a bare "background:
+        # transparent" outranks the application stylesheet's own QComboBox and
+        # QPushButton rules -- so the controls in this row lost their field
+        # colour and Qt resolved the transparency to black in their palette.
+        # Under Fusion transparent means "do not paint" and the page showed
+        # through, which hid it; the Windows 11 style paints from the palette
+        # and drew black text on black. A bare "QWidget { ... }" is no better:
+        # it matches every descendant too. Only the id form stops here.
+        container.setObjectName("controlStrip")
+        container.setStyleSheet(
+            "QWidget#controlStrip { background: transparent; }"
+        )
 
         scroll = QScrollArea(self)
         scroll.setWidget(container)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
-        scroll.viewport().setStyleSheet("background: transparent;")
+        scroll.viewport().setStyleSheet(
+            "QWidget#qt_scrollarea_viewport { background: transparent; }"
+        )
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         # Room for the horizontal bar, which only appears when it is needed.
@@ -123,10 +186,15 @@ class HistoryPage(QWidget):
         # own: opening History with no tool tab open used to leave the window
         # with no route back at all.
         header_row = QHBoxLayout()
-        header_row.addWidget(QLabel("<b>📜 Execution History</b>"))
+        # Two labels, not one: the icon is a themed pixmap and the heading is
+        # rich text, and a QLabel holds one or the other but never both.
+        self._heading_icon = QLabel(self)
+        self._heading_icon.setFixedSize(ICON_PX, ICON_PX)
+        header_row.addWidget(self._heading_icon)
+        header_row.addWidget(QLabel(f"<b>{t('history.heading')}</b>"))
         header_row.addStretch()
-        close_btn = QPushButton("✕ Close", self)
-        close_btn.setToolTip("Return to the tool you were on")
+        close_btn = QPushButton(t("history.close"), self)
+        close_btn.setToolTip(t("history.close_tooltip"))
         close_btn.clicked.connect(self.close_requested)
         header_row.addWidget(close_btn)
         layout.addLayout(header_row)
@@ -142,32 +210,36 @@ class HistoryPage(QWidget):
             QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
         )
         self._tool_filter.setMinimumContentsLength(14)
-        self._tool_filter.addItem("All Tools", None)
+        self._tool_filter.addItem(t("history.all_tools"), None)
         for tid, label in self._tool_labels.items():
             self._tool_filter.addItem(label, tid)
         self._tool_filter.currentIndexChanged.connect(self.refresh)
 
         self._status_filter = QComboBox(self)
-        for s in ["All Status", "success", "error", "running", "cancelled"]:
-            self._status_filter.addItem(s, None if s == "All Status" else s)
+        # The stored status value is the key, not the label: translating the
+        # label must not change what the query filters on.
+        self._status_filter.addItem(t("history.all_status"), None)
+        for value in ("success", "error", "running", "cancelled"):
+            self._status_filter.addItem(t(f"history.status.{value}"), value)
         self._status_filter.currentIndexChanged.connect(self.refresh)
 
         self._range_filter = QComboBox(self)
-        for label, days in [("All time", 0), ("Today", 1), ("Last 7 days", 7), ("Last 30 days", 30)]:
-            self._range_filter.addItem(label, days)
+        for key, days in [("all", 0), ("today", 1), ("week", 7), ("month", 30)]:
+            self._range_filter.addItem(t(f"history.range.{key}"), days)
         self._range_filter.currentIndexChanged.connect(self.refresh)
 
-        refresh_btn = QPushButton("🔄 Refresh", self)
+        refresh_btn = QPushButton(t("history.refresh"), self)
         refresh_btn.clicked.connect(self.refresh)
+        self._refresh_btn = refresh_btn
 
         self._db_size_label = QLabel("", self)
-        self._db_size_label.setToolTip("On-disk size of the execution history database")
+        self._db_size_label.setToolTip(t("history.db_size_tooltip"))
 
-        self._clear_db_btn = QPushButton("🧹 Clear History", self)
-        self._clear_db_btn.setToolTip("Delete every execution record and reclaim disk space")
+        self._clear_db_btn = QPushButton(t("history.clear"), self)
+        self._clear_db_btn.setToolTip(t("history.clear_tooltip"))
         self._clear_db_btn.clicked.connect(self._clear_database)
 
-        filter_row.addWidget(QLabel("Filter:", self))
+        filter_row.addWidget(QLabel(t("history.filter"), self))
         filter_row.addWidget(self._tool_filter)
         filter_row.addWidget(self._status_filter)
         filter_row.addWidget(self._range_filter)
@@ -179,9 +251,9 @@ class HistoryPage(QWidget):
 
         # ── Selection action bar ──────────────────────────────────────────────
         sel_row = QHBoxLayout()
-        sel_all_btn = QPushButton("Select All", self)
-        sel_none_btn = QPushButton("Deselect All", self)
-        self._delete_sel_btn = QPushButton("🗑 Delete Selected", self)
+        sel_all_btn = QPushButton(t("history.select_all"), self)
+        sel_none_btn = QPushButton(t("history.deselect_all"), self)
+        self._delete_sel_btn = QPushButton(t("history.delete_selected"), self)
         self._delete_sel_btn.setEnabled(False)
         sel_all_btn.clicked.connect(self._select_all)
         sel_none_btn.clicked.connect(self._deselect_all)
@@ -194,7 +266,14 @@ class HistoryPage(QWidget):
 
         # ── Table ─────────────────────────────────────────────────────────────
         self._table = QTableWidget(0, 6, self)
-        self._table.setHorizontalHeaderLabels(["", "Timestamp", "Tool", "Status", "Duration", "Result"])
+        self._table.setHorizontalHeaderLabels([
+            "",
+            t("history.column.timestamp"),
+            t("history.column.tool"),
+            t("history.column.status"),
+            t("history.column.duration"),
+            t("history.column.result"),
+        ])
         self._table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self._table.horizontalHeader().setSectionResizeMode(_COL_CHECK, QHeaderView.ResizeMode.Fixed)
         self._table.setColumnWidth(_COL_CHECK, 32)
@@ -214,9 +293,9 @@ class HistoryPage(QWidget):
         self._detail_label.setWordWrap(True)
         det_layout.addWidget(self._detail_label)
         det_btn_row = QHBoxLayout()
-        self._replay_btn = QPushButton("↩ Replay Params", self._detail)
+        self._replay_btn = QPushButton(t("history.replay_params"), self._detail)
         self._replay_btn.clicked.connect(self._do_replay)
-        self._log_btn = QPushButton("📄 View Full Log", self._detail)
+        self._log_btn = QPushButton(t("history.view_full_log"), self._detail)
         self._log_btn.clicked.connect(self._view_log)
         det_btn_row.addWidget(self._replay_btn)
         det_btn_row.addWidget(self._log_btn)
@@ -227,6 +306,51 @@ class HistoryPage(QWidget):
 
         self._selected_record: ExecutionRecord | None = None
         self._open_log_windows: list = []
+
+        self._apply_icons()
+
+    def _apply_icons(self) -> None:
+        """Draw every icon on this page in the active theme's ink.
+
+        One method for all of them, called from ``_build_ui`` and again from
+        :meth:`retheme`, so the page has a single description of which icon
+        goes where rather than one per entry point that could drift.
+
+        The tokens differ because the hosts differ: an icon on a button is
+        button text and takes ``text.button``, while the one beside the heading
+        is part of the heading and takes ``text.primary``. Borrowing one token
+        for both is how an icon ends up dark on a theme whose buttons went dark.
+        """
+        ratio = self.devicePixelRatioF()
+        self._heading_icon.setPixmap(
+            theme_icon("history", "text.primary", ratio=ratio).pixmap(ICON_PX, ICON_PX)
+        )
+        for button, name in (
+            (self._refresh_btn, "refresh"),
+            (self._clear_db_btn, "clear"),
+            (self._delete_sel_btn, "delete"),
+            (self._replay_btn, "replay"),
+            (self._log_btn, "document"),
+        ):
+            button.setIcon(theme_icon(name, ratio=ratio))
+
+        # Rows already on screen. refresh() inks these as it builds each row,
+        # but a re-theme must not re-query: the table would lose the user's
+        # selection and their scroll position over a colour change.
+        for row, rec in enumerate(self._records):
+            item = self._table.item(row, _COL_STAT)
+            name, token = _status_icon(rec.status)
+            if item is not None and name is not None:
+                item.setIcon(theme_icon(name, token, ratio=ratio))
+
+    def retheme(self) -> None:
+        """Redraw the page's icons under the theme that has just become active.
+
+        Icons are pixmaps, and no stylesheet reaches inside one -- see
+        :mod:`decoui.ui.retheme`. Everything else on this page is dressed by the
+        application stylesheet and needs nothing here.
+        """
+        self._apply_icons()
 
     # ── Refresh ───────────────────────────────────────────────────────────────
 
@@ -256,13 +380,17 @@ class HistoryPage(QWidget):
         self._records = query_records(tool_id=tool_id, status=status, since=since)
         self._table.setRowCount(len(self._records))
 
+        # Read once for the whole table rather than per row: every status icon
+        # is drawn at the same ratio, and this is the hot path when a long
+        # history is refreshed.
+        ratio = self.devicePixelRatioF()
+
         for row, rec in enumerate(self._records):
             duration = ""
             if rec.finished_at and rec.started_at:
                 secs = (rec.finished_at - rec.started_at).total_seconds()
                 duration = f"{secs:.1f}s"
 
-            status_icon = {"success": "✅", "error": "❌", "running": "▶", "cancelled": "⛔"}.get(rec.status, "?")
 
             # Checkbox cell
             chk = QTableWidgetItem()
@@ -272,7 +400,11 @@ class HistoryPage(QWidget):
 
             self._table.setItem(row, _COL_TIME, QTableWidgetItem(rec.started_at.strftime("%Y-%m-%d %H:%M:%S")))
             self._table.setItem(row, _COL_TOOL, QTableWidgetItem(rec.tool_label))
-            self._table.setItem(row, _COL_STAT, QTableWidgetItem(f"{status_icon} {rec.status}"))
+            status = QTableWidgetItem(t(f"history.status.{rec.status}"))
+            icon_name, icon_token = _status_icon(rec.status)
+            if icon_name is not None:
+                status.setIcon(theme_icon(icon_name, icon_token, ratio=ratio))
+            self._table.setItem(row, _COL_STAT, status)
             self._table.setItem(row, _COL_DUR,  QTableWidgetItem(duration))
 
             result_preview = ""
@@ -292,7 +424,7 @@ class HistoryPage(QWidget):
     def _update_db_size(self) -> None:
         """Refresh the size readout from the database's current disk usage."""
         size = get_db_size()
-        self._db_size_label.setText(f"DB: {_format_size(size)}")
+        self._db_size_label.setText(t("history.db_size", size=_format_size(size)))
         self._clear_db_btn.setEnabled(size > 0)
 
     def _clear_database(self) -> None:
@@ -392,7 +524,7 @@ class HistoryPage(QWidget):
         self._selected_record = rec
         params = query_params(rec.id)
         param_text = ", ".join(f"{p.param_name}={p.param_value}" for p in params) or "(none)"
-        self._detail_label.setText(f"<b>Params:</b> {param_text}")
+        self._detail_label.setText(f"<b>{t('history.params')}</b> {param_text}")
         self._detail.setVisible(True)
 
     # ── Detail actions ────────────────────────────────────────────────────────
@@ -434,7 +566,10 @@ class HistoryPage(QWidget):
         if not rows:
             return
         menu = QMenu(self)
-        del_act = menu.addAction("🗑 Delete selected rows")
+        del_act = menu.addAction(
+            theme_icon("delete", ratio=self.devicePixelRatioF()),
+            t("history.delete_selected_rows"),
+        )
         del_act.triggered.connect(lambda: self._delete_rows(rows))
         menu.exec(self._table.viewport().mapToGlobal(pos))
 

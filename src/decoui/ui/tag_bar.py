@@ -1,7 +1,7 @@
 """Tag filter bar."""
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QPaintEvent, QPainter
 from PySide6.QtWidgets import (
     QFrame,
@@ -14,7 +14,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..i18n import t
 from ..theme import active_theme
+from .icons import ICON_PX, theme_icon
 
 
 def _pill_style() -> str:
@@ -34,7 +36,8 @@ def _pill_style() -> str:
         "  padding: 2px 12px;"
         "  min-height: 26px;"
         f"  font-size: {theme.font.small_size_pt:g}pt;"
-        f"  border: {shape['shape.border_width']:g}px solid {colors['border.button']};"
+        f"  border: {shape['shape.border_width_control']:g}px "
+        f"{shape['shape.border_style_control']} {colors['border.button']};"
         f"  background: {colors['bg.surface']};"
         f"  color: {colors['text.secondary']};"
         "}"
@@ -50,6 +53,25 @@ def _pill_style() -> str:
     )
 
 
+def _icon_button_style() -> str:
+    """Build the stylesheet for the top bar's two icon buttons.
+
+    The application's generic ``QPushButton`` rule spends ``14px`` of padding
+    on either side, which is right for a button with a word on it. On these two
+    it leaves an 18px icon about six pixels to sit in, and Qt shrinks the icon
+    to fit -- which is what made the settings button look squeezed. Neither
+    button carries text, so all of that padding can go.
+
+    Colours are deliberately absent: the application stylesheet already dresses
+    every button, and re-stating them here would be a second copy to keep in
+    step with the themes.
+
+    Returns:
+        A stylesheet for one icon button.
+    """
+    return "QPushButton { padding: 0px; }"
+
+
 class TagBar(QWidget):
     """Row of toggle pills, one per tag declared by any @toolset.
 
@@ -60,10 +82,12 @@ class TagBar(QWidget):
         tags_changed: Emitted with the set of active tags whenever a pill is
             toggled. The sidebar treats the set as an AND filter.
         settings_requested: Emitted when the settings button is pressed.
+        help_requested: Emitted when the help button is pressed.
     """
 
     tags_changed = Signal(set)   # set of active tag strings
     settings_requested = Signal()
+    help_requested = Signal()
 
     def __init__(self, all_tags: list[str], parent=None):
         """Build one pill per tag.
@@ -90,14 +114,9 @@ class TagBar(QWidget):
         outer.setContentsMargins(12, 2, 6, 2)
         outer.setSpacing(10)
 
-        label = QLabel("Tags:", self)
-        # Without this the label paints the generic QWidget background from the
-        # application stylesheet, punching a lighter rectangle out of the bar's
-        # band -- which is why the band looked as if it started after the label.
-        label.setStyleSheet(
-            f"background: transparent; color: {active_theme().colors['text.on_topbar']};"
-        )
+        label = QLabel(t("topbar.tags"), self)
         outer.addWidget(label)
+        self._label = label
 
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
@@ -106,23 +125,11 @@ class TagBar(QWidget):
         # right alongside the first pill's own border, and the two read as one
         # smudged line. Nothing about this area should be visible at all.
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        # A QScrollArea paints through a separate viewport widget, and the
-        # generic QWidget rule in the application stylesheet reaches that
-        # viewport. Asking for a transparent background is not enough to win
-        # that cascade, so the band colour is painted onto the area, its
-        # viewport and the pill container explicitly.
-        band = f"background: {active_theme().colors['bg.topbar']};"
-        scroll.setStyleSheet(f"QScrollArea {{ {band} border: none; }}")
-        scroll.viewport().setStyleSheet(band)
-        scroll.setHorizontalScrollBarPolicy(
-            __import__("PySide6.QtCore", fromlist=["Qt"]).Qt.ScrollBarPolicy.ScrollBarAsNeeded
-        )
-        scroll.setVerticalScrollBarPolicy(
-            __import__("PySide6.QtCore", fromlist=["Qt"]).Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         container = QWidget(scroll)
-        container.setStyleSheet(band)
+        container.setObjectName("tagStrip")
         row = QHBoxLayout(container)
         # Left inset inside the scrolling area as well as outside it: at zero
         # the first pill sits flush against the viewport edge, where its border
@@ -130,11 +137,9 @@ class TagBar(QWidget):
         row.setContentsMargins(6, 0, 0, 0)
         row.setSpacing(6)
 
-        pill_style = _pill_style()
-        all_btn = QPushButton("All", container)
+        all_btn = QPushButton(t("common.all"), container)
         all_btn.setCheckable(True)
         all_btn.setChecked(True)
-        all_btn.setStyleSheet(pill_style)
         all_btn.clicked.connect(self._clear_all)
         row.addWidget(all_btn)
         self._all_btn = all_btn
@@ -142,7 +147,6 @@ class TagBar(QWidget):
         for tag in sorted(all_tags):
             btn = QPushButton(tag, container)
             btn.setCheckable(True)
-            btn.setStyleSheet(pill_style)
             btn.clicked.connect(lambda checked, t=tag: self._toggle_tag(t, checked))
             row.addWidget(btn)
             self._buttons[tag] = btn
@@ -150,16 +154,92 @@ class TagBar(QWidget):
         row.addStretch()
         scroll.setWidget(container)
         outer.addWidget(scroll)
+        self._scroll = scroll
+        self._container = container
 
-        # Added to the *outer* layout, deliberately: inside the scroll area it
-        # would drift off-screen as soon as there were enough tags to scroll.
-        # Out here it stays pinned to the top-right corner whatever happens.
-        settings_btn = QPushButton("\u2699", self)
-        settings_btn.setFixedWidth(36)
-        settings_btn.setToolTip("Settings")
+        # Added to the *outer* layout, deliberately: inside the scroll area
+        # these would drift off-screen as soon as there were enough tags to
+        # scroll. Out here they stay pinned to the top-right corner whatever
+        # happens.
+        #
+        # Neither carries text: the icon is the label, and it is drawn in
+        # _apply_styles because its colour is the theme's, not the palette's.
+        # The tooltip is what names the button, so it is the only string here.
+        icon_style = _icon_button_style()
+        help_btn = QPushButton(self)
+        help_btn.setFixedSize(36, 36)
+        help_btn.setIconSize(QSize(ICON_PX, ICON_PX))
+        help_btn.setStyleSheet(icon_style)
+        help_btn.setToolTip(t("topbar.help_tooltip"))
+        help_btn.clicked.connect(self.help_requested)
+        outer.addWidget(help_btn)
+        self._help_btn = help_btn
+
+        settings_btn = QPushButton(self)
+        settings_btn.setFixedSize(36, 36)
+        settings_btn.setIconSize(QSize(ICON_PX, ICON_PX))
+        settings_btn.setStyleSheet(icon_style)
+        settings_btn.setToolTip(t("topbar.settings_tooltip"))
         settings_btn.clicked.connect(self.settings_requested)
         outer.addWidget(settings_btn)
         self._settings_btn = settings_btn
+
+        self._apply_styles()
+
+    def _apply_styles(self) -> None:
+        """Write every colour this bar sets on itself, from the active theme.
+
+        Called from ``__init__`` and again from :meth:`retheme`, so the bar has
+        exactly one description of its own colours rather than one per entry
+        point that could drift from the other.
+        """
+        colors = active_theme().colors
+
+        # Without this the label paints the generic QWidget background from the
+        # application stylesheet, punching a lighter rectangle out of the bar's
+        # band -- which is why the band looked as if it started after the label.
+        self._label.setStyleSheet(
+            f"background: transparent; color: {colors['text.on_topbar']};"
+        )
+
+        # A QScrollArea paints through a separate viewport widget, and the
+        # generic QWidget rule in the application stylesheet reaches that
+        # viewport. Asking for a transparent background is not enough to win
+        # that cascade, so the band colour is painted onto the area, its
+        # viewport and the pill container explicitly.
+        #
+        # Each selector names one widget by id. A stylesheet set on a widget
+        # reaches its whole subtree, so the unqualified form would put the band
+        # colour behind every pill as well -- harmless only for as long as each
+        # pill keeps a stylesheet of its own to override it. history_page paid
+        # this bill once already, with a transparent background that turned
+        # every control in the filter row black.
+        band = f"background: {colors['bg.topbar']};"
+        self._scroll.setStyleSheet(f"QScrollArea {{ {band} border: none; }}")
+        self._scroll.viewport().setStyleSheet(
+            f"QWidget#qt_scrollarea_viewport {{ {band} }}"
+        )
+        self._container.setStyleSheet(f"QWidget#tagStrip {{ {band} }}")
+
+        pill_style = _pill_style()
+        self._all_btn.setStyleSheet(pill_style)
+        for btn in self._buttons.values():
+            btn.setStyleSheet(pill_style)
+
+        # The two corner icons are inked from the theme, so a theme swap has to
+        # redraw them rather than merely restyle them. Their stylesheet is not
+        # re-applied here: it names no colour and so cannot go stale.
+        ratio = self.devicePixelRatioF()
+        self._help_btn.setIcon(theme_icon("help", ratio=ratio))
+        self._settings_btn.setIcon(theme_icon("settings", ratio=ratio))
+
+    def retheme(self) -> None:
+        """Repaint the bar under the theme that has just become active.
+
+        The band and the pills are the top bar's own work -- neither survives a
+        stylesheet swap on its own. See :mod:`decoui.ui.retheme`.
+        """
+        self._apply_styles()
 
     def paintEvent(self, event: QPaintEvent) -> None:
         """Draw the stylesheet background Qt would otherwise skip.

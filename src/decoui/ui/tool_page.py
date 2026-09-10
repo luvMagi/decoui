@@ -11,7 +11,7 @@ from PySide6.QtCore import (
     QPropertyAnimation,
     Signal,
 )
-from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
+from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
     QFrame,
     QApplication,
@@ -37,6 +37,7 @@ from ..assist import (
 )
 from ..engine.executor import ExecutionEngine
 from ..registry import ToolInfo
+from ..i18n import t
 from ..theme import active_theme, apply_label_case
 from ..widget_builder import (
     build_widget,
@@ -45,11 +46,20 @@ from ..widget_builder import (
     get_value,
     set_value,
 )
-from .log_window import LogEntry, LogWindow, console_style, default_color, level_colors
+from .icons import theme_icon
+from .log_window import (
+    LogEntry,
+    LogWindow,
+    console_style,
+    default_color,
+    insert_log_line,
+    level_inks,
+    timestamp_color,
+)
 
 #: Status badge -> the theme colour token that inks it.
 _STATUS_INK = {
-    "running": "text.on_accent",
+    "running": "text.on_running",
     "success": "text.on_success",
     "error": "text.on_danger",
     "cancelled": "text.on_neutral",
@@ -57,7 +67,7 @@ _STATUS_INK = {
 
 #: Status badge -> the theme colour token that fills it.
 _STATUS_TOKENS = {
-    "running": "accent",
+    "running": "running",
     "success": "success",
     "error": "danger",
     "cancelled": "neutral",
@@ -153,12 +163,20 @@ class ToolPage(QWidget):
         self._widgets: dict[str, QWidget] = {}
         self._log_records: list[LogEntry] = []
         self._open_log_windows: list = []
-        # Read once, here: the theme is applied before any widget exists and is
-        # never swapped, and _append_log runs per output line -- rebuilding the
-        # level mapping there put a file read and a full theme validation on the
-        # GUI thread for every line the tool printed.
-        self._level_colors = level_colors()
+        # The badge stops on whatever the last run ended as, and its colours are
+        # written into it at that moment. Kept so a re-theme can re-ink the badge
+        # that is on screen instead of leaving the old theme's fill there.
+        self._status: str | None = None
+        # Labels carrying the required-field asterisk, with the text it prefixes.
+        # The asterisk is inked inside rich text, which no stylesheet reaches.
+        self._required_labels: list[tuple[QLabel, str]] = []
+        # Read once, here: _append_log runs per output line, and rebuilding the
+        # ink mapping there put a file read and a full theme validation on the
+        # GUI thread for every line the tool printed. A re-theme refreshes both
+        # -- see retheme() -- rather than moving the lookup back onto that path.
+        self._level_inks = level_inks()
         self._default_color = default_color()
+        self._timestamp_color = timestamp_color()
         self._assist_runner = assist_runner or AssistRunner()
         self._completions: dict[str, CompletionController] = {}
         self._cascade: CascadeController | None = None
@@ -175,8 +193,12 @@ class ToolPage(QWidget):
     # ── UI construction ───────────────────────────────────────────────────────
 
     def _build_ui(self):
-        """Assemble the header, parameter form, controls and console."""
-        _theme = active_theme()
+        """Assemble the header, parameter form, controls and console.
+
+        Colours are not written here. Everything this page inks itself is set by
+        :meth:`_apply_styles`, called at the end, so that a re-theme runs the
+        same code rather than a second copy of it.
+        """
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
@@ -188,10 +210,8 @@ class ToolPage(QWidget):
         separator = QFrame(self)
         separator.setFrameShape(QFrame.Shape.HLine)
         separator.setFixedHeight(1)
-        separator.setStyleSheet(
-            f"background: {_theme.colors['border.panel']}; border: none;"
-        )
         root.addWidget(separator)
+        self._separator = separator
 
         body = QVBoxLayout()
         body.setContentsMargins(16, 12, 16, 12)
@@ -203,13 +223,10 @@ class ToolPage(QWidget):
         header = QHBoxLayout()
         header.setSpacing(8)
         title = QLabel(f"<b>{self._tool.label}</b>", self)
-        title.setStyleSheet(
-            f"font-size: {_theme.font.title_size_px:g}px; "
-            f"color: {_theme.colors['text.primary']};"
-        )
+        self._title = title
         self._status_label = QLabel("", self)
         self._status_label.setStyleSheet("background: transparent;")
-        self._param_toggle_btn = QPushButton("▼ Parameters", self)
+        self._param_toggle_btn = QPushButton(t("tool.parameters_expanded"), self)
         self._param_toggle_btn.setCheckable(True)
         self._param_toggle_btn.setChecked(True)
         self._param_toggle_btn.clicked.connect(self._toggle_params)
@@ -220,18 +237,12 @@ class ToolPage(QWidget):
         root.addLayout(header)
 
         # ── Description ───────────────────────────────────────────────────────
+        self._desc: QLabel | None = None
         if self._tool.description:
             desc = QLabel(self._tool.description, self)
             desc.setWordWrap(True)
-            desc.setStyleSheet(
-                f"color: {_theme.colors['text.muted']};"
-                f"border: {_theme.shape['shape.border_width']:g}px solid "
-                f"{_theme.colors['border.subtle']};"
-                f"border-radius: {_theme.shape['shape.radius_panel']:g}px;"
-                "padding: 8px 12px;"
-                f"background: {_theme.colors['bg.header']};"
-            )
             root.addWidget(desc)
+            self._desc = desc
 
         # ── Progress bar (hidden until run) ───────────────────────────────────
         self._progress = QProgressBar(self)
@@ -252,14 +263,9 @@ class ToolPage(QWidget):
             # Labels may come from user metadata, so they are escaped before
             # going into the rich text that draws the required-field marker.
             text = escape(param.label or param.name)
+            lbl = QLabel(f'{text}:', self._param_panel)
             if not param.has_default:
-                required = _theme.colors["text.required"]
-                lbl = QLabel(
-                    f'<span style="color:{required}">*</span>{text}:',
-                    self._param_panel,
-                )
-            else:
-                lbl = QLabel(f'{text}:', self._param_panel)
+                self._required_labels.append((lbl, text))
             form_layout.addRow(lbl, w)
 
         root.addWidget(self._param_panel)
@@ -267,17 +273,20 @@ class ToolPage(QWidget):
         # ── Action buttons ────────────────────────────────────────────────────
         btn_row = QHBoxLayout()
         btn_row.setSpacing(6)
-        self._run_btn = QPushButton("▶  Run", self)
+        self._run_btn = QPushButton(t("tool.run"), self)
         self._run_btn.setObjectName("run_btn")
         self._run_btn.setDefault(True)
         self._run_btn.clicked.connect(self._on_run)
-        self._reset_btn = QPushButton("↺  Reset", self)
+        self._reset_btn = QPushButton(t("tool.reset"), self)
         self._reset_btn.clicked.connect(self._reset_params)
-        self._stop_btn = QPushButton("■  Stop", self)
+        self._reset_btn.setIcon(
+            theme_icon("reset", ratio=self.devicePixelRatioF())
+        )
+        self._stop_btn = QPushButton(t("tool.stop"), self)
         self._stop_btn.setObjectName("stop_btn")
         self._stop_btn.setVisible(False)
         self._stop_btn.clicked.connect(self._engine.cancel)
-        self._replay_btn = QPushButton("Replay", self)
+        self._replay_btn = QPushButton(t("tool.replay"), self)
         self._replay_btn.clicked.connect(
             lambda: self.history_requested.emit(self._tool.tool_id)
         )
@@ -291,20 +300,15 @@ class ToolPage(QWidget):
         # ── Output section header ─────────────────────────────────────────────
         out_hdr = QHBoxLayout()
         out_hdr.setContentsMargins(0, 4, 0, 0)
-        out_lbl = QLabel("Output", self)
-        out_lbl.setStyleSheet(
-            f"font-weight: bold; color: {_theme.colors['text.muted']}; "
-            f"font-size: {_theme.font.small_size_pt:g}pt; background: transparent;"
-        )
+        out_lbl = QLabel(t("tool.output"), self)
+        self._out_lbl = out_lbl
         out_hdr.addWidget(out_lbl)
         out_hdr.addStretch()
-        self._copy_btn = QPushButton("Copy", self)
+        self._copy_btn = QPushButton(t("tool.copy"), self)
         self._copy_btn.setFixedHeight(24)
-        self._copy_btn.setStyleSheet(_small_button_style(_theme))
         self._copy_btn.clicked.connect(self._copy_console)
-        self._expand_btn = QPushButton("View Log", self)
+        self._expand_btn = QPushButton(t("tool.view_log"), self)
         self._expand_btn.setFixedHeight(24)
-        self._expand_btn.setStyleSheet(_small_button_style(_theme))
         self._expand_btn.clicked.connect(self._expand_console)
         out_hdr.addWidget(self._copy_btn)
         out_hdr.addWidget(self._expand_btn)
@@ -315,8 +319,92 @@ class ToolPage(QWidget):
         self._console.setReadOnly(True)
         self._console.setMinimumHeight(120)
         self._console.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self._console.setStyleSheet(console_style())
         root.addWidget(self._console)
+
+        self._apply_styles()
+
+    # ── Theming ───────────────────────────────────────────────────────────────
+
+    def _apply_styles(self) -> None:
+        """Write every colour this page inks itself, from the active theme.
+
+        These are the parts the application stylesheet cannot reach: a frame
+        used as a hairline, rich text carrying its own colour, and the console,
+        which is meant to read as a terminal rather than as part of the page.
+        """
+        theme = active_theme()
+        colors, shape, font = theme.colors, theme.shape, theme.font
+
+        self._separator.setStyleSheet(
+            f"background: {colors['border.panel']}; border: none;"
+        )
+        self._title.setStyleSheet(
+            f"font-size: {font.title_size_px:g}px; color: {colors['text.primary']};"
+        )
+        if self._desc is not None:
+            self._desc.setStyleSheet(
+                f"color: {colors['text.muted']};"
+                f"border: {shape['shape.border_width_panel']:g}px "
+                f"{shape['shape.border_style_panel']} {colors['border.subtle']};"
+                f"border-radius: {shape['shape.radius_panel']:g}px;"
+                "padding: 8px 12px;"
+                f"background: {colors['bg.header']};"
+            )
+        self._out_lbl.setStyleSheet(
+            f"font-weight: bold; color: {colors['text.muted']}; "
+            f"font-size: {font.small_size_pt:g}pt; background: transparent;"
+        )
+        self._copy_btn.setStyleSheet(_small_button_style(theme))
+        self._expand_btn.setStyleSheet(_small_button_style(theme))
+        # Redrawn rather than restyled: an icon is a pixmap, and no stylesheet
+        # reaches inside one.
+        self._reset_btn.setIcon(theme_icon("reset", ratio=self.devicePixelRatioF()))
+        self._console.setStyleSheet(console_style())
+
+        # Labels may come from user metadata, so they are escaped before going
+        # into the rich text that draws the required-field marker.
+        required = colors["text.required"]
+        for label, text in self._required_labels:
+            label.setText(f'<span style="color:{required}">*</span>{text}:')
+
+        # The badge is written when a run changes state, so nothing else would
+        # repaint it until the next run -- which may be never.
+        if self._status is not None:
+            self._status_label.setStyleSheet(_status_style(self._status))
+
+    def retheme(self) -> None:
+        """Repaint the page, and its console, under the new active theme.
+
+        The run is not touched: no widget is replaced, the form keeps its
+        values, and a tool that is running goes on running. What changes is
+        colour -- including the colour of output already printed, which is
+        re-inked from the records the page keeps, the same way the log window
+        re-inks its own copy.
+
+        Note:
+            The console is rebuilt, so its scroll position is lost and the view
+            returns to the newest line. Known and accepted: re-inking text in
+            place would mean walking the document per line, and a theme change
+            is a deliberate act, not something that happens mid-read.
+        """
+        self._level_inks = level_inks()
+        self._default_color = default_color()
+        self._timestamp_color = timestamp_color()
+        self._apply_styles()
+        self._rerender_console()
+
+    def _rerender_console(self) -> None:
+        """Redraw every line the page has kept, in the active theme's colours."""
+        self._console.clear()
+        cursor = self._console.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        for record in self._log_records:
+            insert_log_line(
+                cursor, record.level, record.message,
+                self._level_inks, self._default_color, self._timestamp_color,
+            )
+        self._console.setTextCursor(cursor)
+        self._console.ensureCursorVisible()
 
     # ── Form assist ───────────────────────────────────────────────────────────
 
@@ -412,7 +500,7 @@ class ToolPage(QWidget):
         self._anim.setEndValue(0)
         self._anim.start()
         self._param_toggle_btn.setChecked(False)
-        self._param_toggle_btn.setText("▶ Parameters")
+        self._param_toggle_btn.setText(t("tool.parameters_collapsed"))
 
     def _expand_params(self):
         """Animate the parameter panel open again."""
@@ -423,7 +511,7 @@ class ToolPage(QWidget):
         self._anim.setEndValue(self._param_panel.sizeHint().height() or 400)
         self._anim.start()
         self._param_toggle_btn.setChecked(True)
-        self._param_toggle_btn.setText("▼ Parameters")
+        self._param_toggle_btn.setText(t("tool.parameters_expanded"))
 
     def _toggle_params(self):
         """Open or close the parameter panel to match the toggle button."""
@@ -444,7 +532,8 @@ class ToolPage(QWidget):
         """
         if self._tool.confirm:
             reply = QMessageBox.question(
-                self, "Confirm", f"Run '{self._tool.label}'?",
+                self, t("tool.confirm_title"),
+                t("tool.confirm_body", tool=self._tool.label),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if reply != QMessageBox.StandardButton.Yes:
@@ -465,8 +554,7 @@ class ToolPage(QWidget):
         self._run_btn.setVisible(False)
         self._stop_btn.setVisible(True)
         self._progress.setVisible(True)
-        self._status_label.setText("Running…")
-        self._status_label.setStyleSheet(_status_style("running"))
+        self._set_status("running", t("tool.running"))
         self._set_params_readonly(True)
         self._collapse_params()
 
@@ -506,19 +594,32 @@ class ToolPage(QWidget):
         # run's percentage.
         self._progress.setRange(0, 0)
         self._run_btn.setVisible(True)
-        self._run_btn.setText("▶  Run Again")
+        self._run_btn.setText(t("tool.run_again"))
         self._stop_btn.setVisible(False)
         self._set_params_readonly(False)
 
         if status == "success":
-            self._status_label.setText(f"Done ({elapsed:.1f}s)")
-            self._status_label.setStyleSheet(_status_style("success"))
+            self._set_status("success", t("tool.done", elapsed=f"{elapsed:.1f}"))
         elif status == "error":
-            self._status_label.setText(f"Error ({elapsed:.1f}s)")
-            self._status_label.setStyleSheet(_status_style("error"))
+            self._set_status("error", t("tool.error", elapsed=f"{elapsed:.1f}"))
         else:
-            self._status_label.setText("Cancelled")
-            self._status_label.setStyleSheet(_status_style("cancelled"))
+            self._set_status("cancelled", t("tool.cancelled"))
+
+    def _set_status(self, status: str, text: str) -> None:
+        """Show one run state on the badge, and record which one it is.
+
+        The badge is the only part of the page whose colour depends on
+        something other than the theme, so it is the only one a re-theme cannot
+        work out for itself. Recording the state here is what lets
+        :meth:`_apply_styles` re-ink it later.
+
+        Args:
+            status: One of the keys of :data:`_STATUS_TOKENS`.
+            text: The label to show, already translated.
+        """
+        self._status = status
+        self._status_label.setText(text)
+        self._status_label.setStyleSheet(_status_style(status))
 
     def _append_log(self, level: str, message: str):
         """Append one coloured line to the console.
@@ -529,15 +630,12 @@ class ToolPage(QWidget):
         """
         self._log_records.append(LogEntry(level, message))
 
-        color = self._level_colors.get(level, self._default_color)
-        fmt = QTextCharFormat()
-        fmt.setForeground(QColor(color))
-        if level == "CRITICAL":
-            fmt.setFontWeight(700)
-
         cursor = self._console.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
-        cursor.insertText(message + "\n", fmt)
+        insert_log_line(
+            cursor, level, message,
+            self._level_inks, self._default_color, self._timestamp_color,
+        )
         self._console.setTextCursor(cursor)
         self._console.ensureCursorVisible()
 

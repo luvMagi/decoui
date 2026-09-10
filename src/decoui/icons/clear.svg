@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <!-- A broom, not a bin. "Clear History" and "Delete Selected" sit side by
+       side in the same toolbar, and drawn as two bins they were one ruled and
+       one not, which is not a difference at 18px. A broom differs in
+       silhouette, which is the only difference that survives the size. -->
+  <g fill="none" stroke="currentColor" stroke-width="2.4"
+     stroke-linecap="round" stroke-linejoin="round">
+    <path d="M20.6 3.4 L13.2 10.8"/>
+    <path d="M10.9 9.7 L14.3 13.1 L11.6 18.2 L5.8 12.4 Z"/>
+    <path d="M8.35 10.75 L11.0 16.0"/>
+  </g>
+</svg>

@@ -22,8 +22,10 @@
 7. [Data Storage](#7-data-storage)
 8. [History Page](#8-history-page)
 9. [Theming](#9-theming)
-10. [Usage Examples](#10-usage-examples)
-11. [Tech Stack](#11-tech-stack)
+10. [The Help Panel](#10-the-help-panel)
+11. [The Interface Language](#11-the-interface-language)
+12. [Usage Examples](#12-usage-examples)
+13. [Tech Stack](#13-tech-stack)
 
 ---
 
@@ -55,14 +57,20 @@ decoui/
 │   └── executor.py      # Execution scheduling, record lifecycle
 ├── storage/
 │   ├── models.py        # Dataclass definitions
+│   ├── store.py         # store(): namespaced key/value for application code
 │   └── db.py            # SQLite CRUD operations
+├── help.py              # Per-tool help, parsed from Google-style docstrings
+├── guide/               # decoui's own help pages, one directory per language
+├── i18n/                # Interface strings, one JSON catalogue per language
 ├── ui/
 │   ├── main_window.py   # Main window + QSplitter layout
 │   ├── nav_tree.py      # Left sidebar (ToolSet/Tool tree)
 │   ├── tag_bar.py       # Tag filter pill buttons
 │   ├── tool_page.py     # Parameter form + output console
 │   ├── history_page.py  # Execution history list + detail view
-│   ├── settings_dialog.py  # Theme picker
+│   ├── settings_dialog.py  # Theme and language picker
+│   ├── help_window.py   # The Help panel: tree, tabs, cross-references
+│   ├── retheme.py       # Swap the theme of a running application
 │   └── log_window.py    # Shared resizable log viewer window
 ├── themes/              # Built-in themes, one JSON each (bundled in wheel)
 ├── icon.png             # Application icon (bundled in wheel)
@@ -78,13 +86,19 @@ decoui/
 | `engine/executor.py` | Schedule runs; `ExecutionRecord` lifecycle; log batch writing |
 | `storage/db.py` | SQLite history CRUD and key-value application settings; WAL mode |
 | `storage/models.py` | `ExecutionRecord`, `ExecutionParam`, `ExecutionLog` dataclasses |
+| `storage/store.py` | `store()`: a namespaced key/value store over `app_setting`, for the applications built on decoui |
 | `ui/main_window.py` | QSplitter layout; persistent sidebar; stacked history/tool-tab views; signal wiring |
 | `ui/nav_tree.py` | Two-layer tree; search; tag filtering; keyboard navigation |
 | `ui/tag_bar.py` | The window's top bar: pill-style tag buttons and the settings button |
 | `ui/tool_page.py` | Form generation; collapse animation; output console; Replay button |
 | `ui/history_page.py` | History table; filtering; checkboxes; detail panel; replay |
 | `ui/log_window.py` | Shared `LogWindow(QMainWindow)` + `LogEntry` namedtuple; console styling and log-level colours, both from the theme |
-| `ui/settings_dialog.py` | Theme picker; the only settings decoui offers |
+| `ui/settings_dialog.py` | Theme and language picker; the only settings decoui offers |
+| `ui/retheme.py` | Re-theme every open window in place, without rebuilding anything |
+| `ui/help_window.py` | The Help panel: filterable tree, one tab per page, cross-references, back/forward |
+| `help.py` | Parse Google-style docstrings into the parts the Help panel renders |
+| `guide/` | decoui's own help pages, as files rather than string constants, one directory per language |
+| `i18n/` | decoui's own interface strings, one JSON catalogue per language, English as the fallback |
 | `theme.py` | Token definitions, JSON theme loading and validation, stylesheet template, the active theme |
 | `runner.py` | `gui_main()` entry; theme discovery, resolution and application |
 
@@ -472,11 +486,61 @@ CREATE INDEX idx_log_record ON execution_log(record_id, seq);
 
 ### 7.4 Application Settings
 
-- `get_setting(key, default)` reads a value from `app_setting`.
-- `set_setting(key, value)` inserts or updates a value and its timestamp.
-- `ui.sidebar.width` stores the first `QSplitter` pane width in pixels.
-- Splitter writes are debounced by 250 ms and flushed again when the main window closes.
-- Invalid or missing sidebar values fall back to 220 px.
+One `app_setting` table, shared by decoui and by the applications built on it.
+
+- `get_setting(key, default)` reads a value; `set_setting(key, value)` inserts
+  or updates it and its timestamp.
+- `delete_setting(key)` removes one; `settings_with_prefix(prefix)` lists a
+  range. Both added in v0.5.0 for the store described below.
+- decoui's own keys live under `ui.`: `ui.theme`, `ui.language`,
+  `ui.sidebar.width`.
+- Splitter writes are debounced by 250 ms and flushed again when the main
+  window closes. Invalid or missing sidebar values fall back to 220 px.
+- `clear_all_records()` deliberately **preserves** this table. Clearing the run
+  history must not throw away what an application was told to remember.
+
+### 7.5 The settings store
+
+`store(namespace)` (`storage/store.py`) is the public face of that table for
+application code, and the only one — before v0.5.0 an application had to import
+`decoui.storage.db` directly, which the bundled example did.
+
+It is a mapping with upsert semantics: writing a key inserts it when absent and
+replaces it when present, so there is no separate registration step to get
+wrong.
+
+**The namespace is the caller's to choose**, not derived from the class. Some
+settings belong to one toolset and some are shared by all of them; a namespace
+taken from the class name can only express the first. `ui` and `decoui` are
+refused outright rather than left to discipline.
+
+**The namespace lives in the key**, written `namespace.key`, and not in a
+column of its own. That is forced rather than preferred:
+
+> `init_db()` is all `CREATE TABLE IF NOT EXISTS`. A table that already exists
+> is left exactly as it is, so a new column never appears in any database a
+> user already has — and the first query naming it fails at startup, not
+> gracefully. Adding a column to `app_setting` therefore means building a
+> migration mechanism first. There is none (§7.1).
+
+A prefix needs no schema change at all, and `key` is the table's primary key,
+so listing a namespace is an index range scan rather than a table scan. The
+prefix is escaped before it reaches `LIKE`, whose `_` would otherwise make
+namespace `my_ns` collect `myXns`'s rows.
+
+**Values are stored as JSON** in the existing `value` column, which makes a
+`type` column redundant for the same reason: the encoding carries the type.
+Decoding falls back to the raw string, because rows written before this existed
+hold bare text — `light`, not `"light"` — and raising on those would turn a
+readable value into a crash.
+
+A value JSON cannot carry raises `TypeError` at the write. Coercing it to
+`str()` would store `'<object object at 0x…>'` and fail later, elsewhere, with
+nothing pointing back.
+
+Scope is deliberate and worth defending: small values, addressed one at a time,
+no queries and no relations. A tool with real data of its own should open its
+own file.
 
 ---
 
@@ -534,8 +598,8 @@ colour, a corner radius or a font.
 ```
 Theme
 ├── id / name          stable key + display name (see 9.5)
-├── colors   × 59      per part, not per application
-├── shape    ×  8      five radii, two border widths, one border style
+├── colors   × 69      per part, not per application
+├── shape    × 14      six radii, five border widths, three border styles
 └── font     ×  8      family, size, tracking, mono pair, title, small, caps
 ```
 
@@ -570,6 +634,9 @@ two halves must be able to move in opposite directions:
 | `text.on_success` / `on_danger` / `on_neutral` | a bright Run button needs dark text while Stop stays dark and needs light text |
 | `bg.topbar` + `text.on_topbar` | the top bar may be a dark band |
 | `bg.console` + `console.*` | the console is not necessarily dark |
+| `console.tag.*` vs `console.body.*` | a console is scanned by level, so the tag is the loud thing and the message stays readable underneath it |
+| `shape.border_style_panel` / `_control` / `_field` | a theme may bevel its buttons without bevelling its tables |
+| `running` vs `accent` | `accent` fills every checked button, so a theme that wants its toggles the same colour as its Run button would otherwise get a Running badge identical to the Done one |
 
 ### 9.3 Rendering
 
@@ -580,26 +647,64 @@ become underscores, since `$bg.app` would end at the dot.
 
 Widgets that style themselves in code -- status badges, tag pills, the console
 -- read `active_theme()` instead. `theme.py` keeps the applied theme in a module
-global, the same way `storage.db` keeps the database path; there is no need for
-anything more, because decoui never re-themes a running window.
+global, the same way `storage.db` keeps the database path. A re-theme rewrites
+that global and then tells those widgets to redo their own styling — see
+§9.4.
 
 Two things QSS cannot express are handled through the font instead:
 
 - **Capitals.** Qt's stylesheet dialect has no `text-transform`, so
   `font.uppercase` is applied with `QFont.setCapitalization`. The widgets' text
   is never modified -- tab titles double as lookup keys.
-- **Bevels.** There are no gradients in this format, but `shape.border_style`
-  passes Qt's `outset` / `inset` / `ridge` / `groove` through, which draws a
-  raised or sunken edge from the border colour alone.
+- **Bevels.** There are no gradients in this format, but the
+  `shape.border_style_*` tokens pass Qt's `outset` / `inset` / `ridge` /
+  `groove` through, which draws a raised or sunken edge from the border
+  colour alone. `double` is accepted too, but Qt needs a width of at least 3
+  before it can fit two lines into the border it is given.
 
-### 9.4 Applied once, at startup
+### 9.4 Applied at startup, and swapped in place
 
-`_apply_theme()` runs before any widget exists, and decoui never swaps a theme
-in a live window: widgets that read their colours at construction time would be
-left stale. The settings dialog records a choice and says a restart is needed.
+`_apply_theme()` runs before any widget exists. From v0.5.0 a theme can also be
+swapped while the application is running: `retheme_application()`
+(`ui/retheme.py`) does the same three things -- record, font, stylesheet -- and
+then walks the open windows.
 
-This is what keeps the mechanism small -- no re-style pass, no rebuild of open
-pages, and no risk to a tool that is running.
+The walk is needed because a stylesheet swap does not reach everything. Most
+colour is in the application stylesheet and Qt re-applies that to every widget
+for free; the rest belongs to widgets that style themselves in code, because
+they need a shape or a colour the global rules cannot express:
+
+| Widget | What it inks itself | Why not the stylesheet |
+|---|---|---|
+| `TagBar` | The top band, on the area, its viewport and the pill container | The generic `QWidget` rule reaches a `QScrollArea`'s viewport and wins |
+| `TagBar` | The pills | The one fully-rounded control in the interface |
+| `ToolPage` | Separator, title, description, console, small buttons | A frame used as a hairline; per-part sizes from the theme's typography |
+| `ToolPage` | The status badge | Its fill depends on the run's outcome, not on the theme alone |
+| `ToolPage` | The required-field asterisk | Rich text carries its own colour |
+| `ToolPage` / `LogWindow` | Lines already printed | A line's three inks are character formats, written as the line arrived |
+| `HelpWindow` | The whole page | `QTextBrowser` does not read the application stylesheet |
+
+Each of those declares `retheme()`, found by name rather than through a base
+class -- a widget opts in by having the method. Nothing is destroyed: a running
+tool keeps running, forms keep their values, and consoles keep their lines.
+
+Two ordering rules the pass depends on:
+
+* **Capitals last.** `apply_label_case()` works through the widget font, and Qt
+  re-resolves a widget's font when its stylesheet changes. It also has to run
+  after the new stylesheet is installed for a second reason: the QSS `QWidget`
+  rule pins each control's family and size, and that is what stops the capitals
+  reaching the console and the input fields (§9.2).
+* **Both cases are set.** `apply_label_case()` writes `MixedCase` as well as
+  `AllUppercase`. Setting only the latter would make the change one-way -- every
+  theme after the first uppercase one would inherit its capitals.
+
+Known cost: `ToolPage.retheme()` rebuilds the console from the records it keeps,
+so the scroll position is lost and the view returns to the newest line.
+
+The **interface language** is not swapped this way and still needs a restart.
+Text is read at build time in far more places than colour is, and there
+is no equivalent of the stylesheet to catch what a walk would miss.
 
 ### 9.5 Failure is never fatal
 
@@ -642,7 +747,113 @@ its own, and rewriting its colours was not part of adding themes.
 
 ---
 
-## 10. Usage Examples
+## 10. The Help Panel
+
+### 10.1 One key per page
+
+Every page the panel can show has a key, and the shape of a key says what it
+addresses:
+
+| Key | Page |
+|---|---|
+| `guide` | decoui's own contents page |
+| `guide.<slug>` | one of decoui's guide pages, from the filename minus its order digits |
+| `ClassName` | a toolset (`ToolSetHelp.set_id`) |
+| `ClassName.method` | a tool (`ToolHelp.tool_id`) |
+
+The same key addresses a tree row, a tab, a history entry and a written
+cross-reference. That is the point of having one: the three views stay in step
+by comparing keys, with no second table mapping between them.
+
+Keys are **stable across languages** — a slug comes from the filename, not from
+the translated title — so a link written once works in every catalogue.
+
+### 10.2 Cross-references degrade rather than dangle
+
+`[text](key)` renders as an anchor only when the key resolves in this session.
+Anything else renders as its own text, with no link on it.
+
+This is not defensiveness for its own sake: which tools exist is decided by the
+application that loaded them, so a guide page cannot be written against a fixed
+set. The renderers therefore take the resolvable keys as a parameter
+(`_inline(text, links)`) rather than reaching for global state, which also makes
+the behaviour testable without a window.
+
+Anchors carry decoui's own `decoui:` scheme and `_follow()` ignores every other
+one. Prose reaches the renderer from tools decoui did not write; an `http` URL
+in a docstring must not become a way out to the network.
+
+### 10.3 Tabs and history
+
+Each page opens in a tab, as the main window opens a tool. History is therefore
+**across** tabs rather than inside one: with a tab per page, a per-tab history
+would hold exactly one entry and back would never do anything.
+
+| Action | History |
+|---|---|
+| Tree selection, followed link, raised tab | recorded |
+| Back, forward | move through it, never appended to |
+| Closing a tab | left alone — going back to that page opens it again |
+| Filtering the tree | nothing; typing is not navigation |
+
+`QTextBrowser.setOpenLinks(False)` is required, not decorative: left to itself
+the widget treats an anchor as a document to load, and blanks the page when it
+cannot find one.
+
+Re-theming rebuilds **every** open tab, not only the visible one — see §9.4 for
+why a QTextBrowser cannot be reached by a stylesheet swap.
+
+---
+
+## 11. The Interface Language
+
+### 11.1 What is translated, and what is not
+
+`i18n/` covers the strings **decoui itself** puts on screen: Run, Stop, the
+history columns, the settings dialog, the guide pages under `guide/`.
+
+It does not cover a tool's own label, description or docstring. Those belong to
+the application that wrote the tool, and decoui has no business translating
+them — nor any way to, since they arrive as Python source.
+
+### 11.2 One catalogue per language, English as the floor
+
+A catalogue is one JSON file, `<code>.json`, beside the module. Adding a
+language means dropping a file in; no code changes.
+
+English is the source language and `en.json` is the only catalogue guaranteed
+complete. **Every other one falls back to it key by key**, so a partial
+translation shows translated text where it exists and English where it does
+not, rather than failing. A catalogue that is missing, unreadable or not a JSON
+object degrades to empty — text is presentation, and English is always there.
+
+The settings dropdown labels each language by its **endonym**, from the
+catalogue's own `language.name`: a reader looking for their language recognises
+"Deutsch", not "German", and by definition cannot read the current interface
+language well enough for the alternative to help.
+
+### 11.3 Applied once, unlike the theme
+
+`set_language()` runs before any widget exists and the language is never
+swapped in a running window. This is the one place decoui and its theme system
+diverge (§9.4):
+
+| | Colour | Text |
+|---|---|---|
+| Where most of it lives | the application stylesheet | nowhere central — read at build time, everywhere |
+| Can be swapped in place | **yes**, since `0.5.0` | no |
+| What a swap would miss | the handful of widgets that ink themselves, which are told | every label already built |
+
+Making the language live would mean a `retranslateUi()` pass over every widget
+decoui builds. That is a different piece of work from re-styling, and it is not
+done.
+
+The language is applied **before** the theme, because the theme's own failure
+dialog is written in the interface language.
+
+---
+
+## 12. Usage Examples
 
 ### Minimal
 
@@ -706,7 +917,7 @@ if __name__ == "__main__":
 
 ---
 
-## 11. Tech Stack
+## 13. Tech Stack
 
 | Area | Technology |
 |---|---|

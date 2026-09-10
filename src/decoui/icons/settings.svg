@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <!-- Eight teeth on a stroked ring, centred on (12,12). Each tooth runs from
+       r=4.8, which falls inside the ring's 4.2..7.0 stroke band so the two
+       merge, out to r=10.2. The ring is stroked rather than filled, which
+       leaves the hub hole without needing a second subpath and an even-odd
+       fill rule.
+       The teeth are the wider stroke of the two on purpose: drawn at the
+       ring's weight they came out long and thin enough to read as a sun
+       rather than as a gear. They stop at r=10.2 because a 3.8 stroke adds
+       1.9 of half-width, and the diagonal tips would otherwise clip the box.
+       "currentColor" is a placeholder: ui/tag_bar.py substitutes the active
+       theme's button text colour before handing the source to QSvgRenderer. -->
+  <g fill="none" stroke="currentColor">
+    <path stroke-width="3.8"
+          d="M16.8 12 L22.2 12 M15.39 8.61 L19.21 4.79 M12 7.2 L12 1.8
+             M8.61 8.61 L4.79 4.79 M7.2 12 L1.8 12 M8.61 15.39 L4.79 19.21
+             M12 16.8 L12 22.2 M15.39 15.39 L19.21 19.21"/>
+    <circle cx="12" cy="12" r="5.6" stroke-width="2.8"/>
+  </g>
+</svg>

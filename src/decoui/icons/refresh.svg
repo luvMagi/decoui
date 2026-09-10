@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <!-- Two arcs and two heads, deliberately: reset.svg is the single-arrow
+       version, and the pair have to stay apart at 18px. -->
+  <g fill="none" stroke="currentColor" stroke-width="2.4"
+     stroke-linecap="round" stroke-linejoin="round">
+    <path d="M20.2 12 A8.2 8.2 0 0 1 6.2 17.8"/>
+    <path d="M3.8 12 A8.2 8.2 0 0 1 17.8 6.2"/>
+    <path d="M17.8 2.6 L17.8 6.6 L13.8 6.6"/>
+    <path d="M6.2 21.4 L6.2 17.4 L10.2 17.4"/>
+  </g>
+</svg>

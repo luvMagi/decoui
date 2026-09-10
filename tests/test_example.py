@@ -18,7 +18,7 @@ from PySide6.QtWidgets import QApplication
 from decoui.decorators import _TOOLSET_ATTR
 from decoui.engine import worker as worker_module
 from decoui.engine.executor import ExecutionEngine
-from decoui.example import DemoTools, Encoding
+from decoui.example import TOOLSETS, FieldTools, LogLevel, RunTools
 from decoui.registry import ToolInfo, build_tree
 from decoui.storage.db import set_db_path
 
@@ -60,8 +60,8 @@ def recorder() -> Iterator[_Recorder]:
     worker_module._thread_local.signals = None
 
 
-def _demo_tool(label: str) -> ToolInfo:
-    """Look up one tool of DemoTools by its display label.
+def _run_tool(label: str) -> ToolInfo:
+    """Look up one tool of RunTools by its display label.
 
     Args:
         label: The tool's ``@tool(label=...)``.
@@ -69,7 +69,7 @@ def _demo_tool(label: str) -> ToolInfo:
     Returns:
         Its ToolInfo.
     """
-    return next(t for t in build_tree(DemoTools)[0].tools if t.label == label)
+    return next(t for t in build_tree(RunTools)[0].tools if t.label == label)
 
 
 def test_example_tree_builds() -> None:
@@ -78,41 +78,48 @@ def test_example_tree_builds() -> None:
     build_tree() is where a wrong key or a missing callback method is caught, so
     this covers the whole example at once.
     """
-    import decoui.example as example
+    assert all(hasattr(cls, _TOOLSET_ATTR) for cls in TOOLSETS)
 
-    classes = [
-        obj
-        for obj in vars(example).values()
-        if isinstance(obj, type) and hasattr(obj, _TOOLSET_ATTR)
-    ]
-    tree = build_tree(*classes)
+    tree = build_tree(*TOOLSETS)
 
-    assert len(tree) == 4
-    assert sum(len(ts.tools) for ts in tree) == 15
+    assert len(tree) == 3
+    assert sum(len(ts.tools) for ts in tree) == 9
 
 
-def test_slow_task_reports_progress(recorder: _Recorder) -> None:
+def test_long_task_reports_progress(recorder: _Recorder, monkeypatch) -> None:
     """Verify the progress demo drives the bar and always reaches 100%."""
-    result = DemoTools().slow_task(steps=3, delay=0.0)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+
+    result = RunTools().long_task(steps=3)
 
     assert result == "Completed 3 steps."
     assert recorder.calls[-1] == (3, 3, "done")
 
 
-def test_slow_task_runs_without_a_gui() -> None:
-    """Verify calling the tool directly still works, progress() included.
+def test_long_task_reports_a_failure_where_it_was_asked_to(monkeypatch) -> None:
+    """Verify the fail_at switch raises, so the error path can be demonstrated."""
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+
+    with pytest.raises(RuntimeError, match="step 2"):
+        RunTools().long_task(steps=5, fail_at=2)
+
+
+def test_tools_run_without_a_gui(monkeypatch) -> None:
+    """Verify calling a tool directly still works, progress() included.
 
     This is the property the whole framework is built around: a tool is a plain
     method. Outside a worker, progress() must be a silent no-op.
     """
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
     worker_module._thread_local.signals = None
 
-    assert DemoTools().slow_task(steps=2, delay=0.0) == "Completed 2 steps."
+    assert RunTools().long_task(steps=2) == "Completed 2 steps."
+    assert "level" in FieldTools().all_widgets("abc")
 
 
 def test_child_process_tool_declares_its_cleanup() -> None:
     """Verify the cancellation demo is actually wired to its hook."""
-    info = _demo_tool("Run Child Process")
+    info = _run_tool("Run External By Hand")
 
     assert info.on_cancel == "stop_child"
     assert info.timeout == 120
@@ -128,14 +135,10 @@ def test_cancelling_the_child_process_tool_kills_the_child(
     """
     set_db_path(tmp_path / "history.db")
     engine = ExecutionEngine()
-    instance = DemoTools()
+    instance = RunTools()
 
     started = time.monotonic()
-    engine.run(
-        _demo_tool("Run Child Process"),
-        instance,
-        {"seconds": 30, "encoding": Encoding.UTF8},
-    )
+    engine.run(_run_tool("Run External By Hand"), instance, {"seconds": 30})
     deadline = time.monotonic() + 5.0
     while instance._child is None and time.monotonic() < deadline:
         time.sleep(0.01)

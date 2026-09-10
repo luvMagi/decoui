@@ -11,12 +11,13 @@ It changes **how existing widgets look**: colours, corner radii, border widths,
 font family and spacing. It cannot add, remove or rearrange widgets, and it
 cannot express gradients or bevels -- every colour token is one flat value.
 
-Two parts of the UI deliberately do **not** follow the theme:
+One part of the UI deliberately does **not** follow the theme:
 
-* The output console keeps its dark background and its per-level text colours
-  (see :mod:`decoui.ui.log_window`). It reads as a terminal in every theme.
 * Text casing. Qt's stylesheet dialect has no ``text-transform``, so a theme
   cannot upper-case labels; only the application's own strings decide that.
+
+The console does follow it -- background, frame and every log-level ink are
+tokens (see :mod:`decoui.ui.log_window`) -- so a light console is possible.
 
 Token names are a public contract
 ---------------------------------
@@ -37,7 +38,7 @@ from __future__ import annotations
 import json
 import re
 import traceback
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import cache
 from importlib import resources
 from pathlib import Path
@@ -56,6 +57,17 @@ DEFAULT_THEME_ID = "light"
 #: startup, and two spellings of one key fail silently: the choice is saved and
 #: then never found again.
 THEME_SETTING = "ui.theme"
+
+#: Settings key holding the interface font stack the user typed in Settings, as
+#: one comma-separated string. Here for the same reason THEME_SETTING is: the
+#: startup path reads the key the dialog writes, and two spellings of one key
+#: fail silently.
+#:
+#: Unset or empty means "whatever the theme asks for". This is an override laid
+#: over the theme rather than a replacement for it, so a user who picks a font
+#: and then switches theme keeps their font, and one who clears the box gets the
+#: new theme's own stack back.
+FONT_FAMILY_SETTING = "ui.font.family"
 
 #: A theme id: lowercase, digits and hyphens, starting with an alphanumeric.
 _ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -101,10 +113,15 @@ COLOR_TOKENS: frozenset[str] = frozenset({
     # One ink per filled control. They are separate because the fills they sit
     # on are chosen independently: a theme may want a bright Run button that
     # needs dark text while its Stop button stays dark and needs light text.
+    "text.on_running",
     "text.on_success",
     "text.on_danger",
     "text.on_neutral",
     "text.required",       # the asterisk marking a required field
+    "text.link",           # cross-references in the Help window's pages. Its
+                           # own token rather than `accent`: accent is a fill
+                           # colour, and a link that matches the selection
+                           # highlight reads as a selected thing, not a link.
     "text.button",
     "text.on_sidebar",     # the tool list -- separate so the sidebar may be dark
     "text.on_sidebar_selected",
@@ -118,24 +135,57 @@ COLOR_TOKENS: frozenset[str] = frozenset({
     "border.button_hover",
     "border.button_disabled",
     "border.tab",
+    "border.tab_selected",  # the cap drawn along the top of the current tab.
+                            # Its own token rather than `accent`: the cap is
+                            # the one place a theme marks "you are here" with a
+                            # line rather than a fill, and it is read against
+                            # the page it sits on, not against a control.
     "border.focus",        # the focused input's outline
     "border.console",      # the frame the console sits inside
     # ── Accent and semantics ─────────────────────────────────────────────────
     "accent",
     "accent.soft",         # selection fills
-    "success", "success.hover",
+    "accent.check",        # the fill of a ticked check box, in a form or in the
+                           # history table. Its own token rather than `accent`
+                           # because a check indicator carries no text: `accent`
+                           # is chosen to be a ground for `text.on_accent` to
+                           # sit on, and a theme is free to make it dark on that
+                           # basis -- cockpit does, and its check boxes came out
+                           # near-black squares. This one is only ever seen on
+                           # its own, so it has to read as "on" unaided.
+    "success", "success.hover",   # the Run button, and the badge a run ends on
+    # The badge while a run is in flight. Its own token rather than `accent`,
+    # which it used to borrow: `accent` also fills every checked button, so a
+    # theme that wanted its Run button and its toggles the same colour got a
+    # Running badge indistinguishable from the Done one it turns into.
+    "running",
     "danger", "danger.hover",
     "neutral",
     # ── Console log levels ───────────────────────────────────────────────────
-    # One per level the log viewer knows. They live in the theme so a light
-    # console is possible at all: the phosphor palette below only reads on a
-    # dark ground.
-    "console.stdout",
-    "console.debug",
-    "console.info",
-    "console.warning",
-    "console.error",
-    "console.critical",
+    # These live in the theme so a light console is possible at all: the
+    # phosphor palette the dark themes use only reads on a dark ground.
+    "console.plain",       # a line carrying no level: raw stdout, and anything
+                           # emitted without the formatter's prefix. Doubles as
+                           # the console widget's own foreground, so it is what
+                           # an unstyled character lands on.
+    "console.timestamp",   # the [12:03:44] prefix. One token, not one per
+                           # level: a clock reading carries no severity, and
+                           # five copies of the same grey is a worse thing to
+                           # ask a theme author to keep in step.
+    # Two inks per level, because the rest of a formatted line is two things:
+    #
+    #     [12:03:44] WARNING  disk almost full
+    #     └timestamp┘└─tag──┘└───── body ─────┘
+    #
+    # The tag is what the eye scans a console for, so it carries the loud
+    # colour, while the message keeps a quieter one that stays readable in
+    # bulk. A theme that wants the old whole-line tint sets a level's tag and
+    # body to the same value.
+    "console.tag.debug",    "console.body.debug",
+    "console.tag.info",     "console.body.info",
+    "console.tag.warning",  "console.body.warning",
+    "console.tag.error",    "console.body.error",
+    "console.tag.critical", "console.body.critical",
     # ── Scrollbars ───────────────────────────────────────────────────────────
     "scrollbar.handle",
     "scrollbar.handle_hover",
@@ -149,14 +199,47 @@ SHAPE_TOKENS: frozenset[str] = frozenset({
     # The console is a control, not a panel: it sits in the same column as the
     # buttons above it and is read as one framed element with them, so it
     # follows their radius rather than the table's.
-    "shape.radius_control",   # buttons, inputs, dropdowns, tabs, tree rows, console
+    # A button is the one control a theme is most likely to want a shape of its
+    # own for -- pill buttons over square fields, or the reverse -- and it is
+    # the only one whose corner is read as a deliberate style choice rather
+    # than as the edge of a box you type in.
+    "shape.radius_button",
+    "shape.radius_control",   # inputs, dropdowns, tabs, tree rows, console
     "shape.radius_panel",     # tables and the description box
     "shape.radius_pill",      # tag pills and status badges
-    "shape.border_width",
+    # Borders are grouped the way the colour tokens already are: the frame
+    # around a panel, the edge of a control, and the outline of an input are
+    # three different jobs, and a theme that bevels its buttons does not
+    # necessarily want a bevelled table. Width and style are named per group
+    # for that reason; the nine `border.*` colours stay finer-grained because
+    # they also carry hover and disabled states, which geometry does not.
+    "shape.border_width_panel",     # tag bar, sidebar, splitter, table, header
+    "shape.border_width_control",   # buttons, tabs, the console frame
+    "shape.border_width_field",     # inputs, dropdowns, the dropdown popup
+    # The lines that have to out-weigh the ordinary border beside them: a check
+    # indicator reads as a smudge at 1px, and the cap on the current tab has to
+    # look like a marker rather than like the tab's own edge. Not a group --
+    # one knob for the few places that mean "notice this".
     "shape.border_width_emphasis",
+    # The focused input's outline. Its own width because colour alone is not
+    # always enough to mark focus: on a low-contrast chassis the ring has to
+    # thicken to register. Setting it equal to `border_width_field` leaves
+    # focus a pure colour change, which is what most themes want -- see the
+    # note in the template about what a wider ring costs.
+    "shape.border_width_focus",
     # Qt draws outset/inset borders as a bevel from the border colour alone, so
     # a panel look is reachable without the gradients this format cannot carry.
-    "shape.border_style",
+    # `double` needs a width of at least 3 before Qt can fit two lines in it.
+    "shape.border_style_panel",
+    "shape.border_style_control",
+    "shape.border_style_field",
+})
+
+#: The shape tokens whose value is a style name rather than a number.
+STYLE_TOKENS: frozenset[str] = frozenset({
+    "shape.border_style_panel",
+    "shape.border_style_control",
+    "shape.border_style_field",
 })
 
 #: The border styles Qt renders. Anything else is refused rather than silently
@@ -363,7 +446,7 @@ def _check_shape(values: dict[str, Any], source: str) -> dict[str, float]:
     """
     result: dict[str, float] = {}
     for token, value in values.items():
-        if token == "border_style" or token.endswith(".border_style"):
+        if token in STYLE_TOKENS:
             if value not in BORDER_STYLES:
                 raise ThemeError(
                     f"{source}: shape['{token}'] must be one of "
@@ -791,7 +874,9 @@ def active_theme_dir() -> Path:
 def set_active_theme(theme: Theme) -> None:
     """Record the theme the application is running under.
 
-    Called once, from gui_main(), before any widget is built.
+    Called from gui_main() before any widget is built, and again from
+    :func:`decoui.ui.retheme.retheme_application` when the user picks a
+    different one. It records; applying the theme is the caller's job.
 
     Args:
         theme: The theme whose stylesheet was applied.
@@ -821,29 +906,113 @@ def active_theme() -> Theme:
     return _ACTIVE_THEME
 
 
+def parse_font_family(text: str | None) -> tuple[str, ...]:
+    """Read a typed family stack into the tuple a :class:`FontSpec` holds.
+
+    The setting is stored the way it is typed -- one comma-separated string --
+    because that is also how a theme file writes a stack and how CSS writes one,
+    and a user who knows either already knows this box.
+
+    Args:
+        text: Comma-separated family names. ``None``, empty, and a string of
+            nothing but separators all mean the same thing: no override.
+
+    Returns:
+        The families in the order given, with surrounding space and empty
+        entries dropped. Empty when the input names nothing usable.
+    """
+    if not text:
+        return ()
+    return tuple(name.strip() for name in text.split(",") if name.strip())
+
+
+def with_font_family(theme: Theme, families: tuple[str, ...]) -> Theme:
+    """Return ``theme`` with its interface font stack replaced.
+
+    Only ``font.family`` moves. ``font.mono_family`` is left alone deliberately:
+    the console and the log viewer align their output in columns, which holds
+    only for as long as that face stays monospaced, and a user choosing an
+    interface font has said nothing about their terminal. The sizes stay too --
+    they are the theme's proportions, not the user's choice of face.
+
+    Args:
+        theme: The theme to derive from. It is not modified; ``Theme`` and
+            ``FontSpec`` are both frozen.
+        families: The replacement stack, as :func:`parse_font_family` returns
+            it. Empty leaves the theme untouched, so a caller can pass a parsed
+            setting straight through without testing it first.
+
+    Returns:
+        The derived theme, or ``theme`` itself when there is nothing to apply.
+    """
+    if not families:
+        return theme
+    return replace(theme, font=replace(theme.font, family=families))
+
+
+def theme_font(theme: Theme):
+    """Build the application font a theme asks for.
+
+    The families are tried in order and Qt falls back through them, so the same
+    theme renders on Windows, macOS and Linux without per-platform code.
+
+    Args:
+        theme: The theme supplying the family stack and point size.
+
+    Returns:
+        A QFont ready for ``QApplication.setFont``.
+    """
+    from PySide6.QtGui import QFont
+
+    font = QFont()
+    font.setFamilies(list(theme.font.family))
+    font.setPointSize(theme.font.size_pt)
+    return font
+
+
 def apply_label_case(widget) -> None:
-    """Render a widget's label in capitals when the theme asks for it.
+    """Render a widget's label in the case the theme asks for.
 
     Qt's stylesheet dialect has no ``text-transform``, so this goes through the
     font instead. The widget's ``text()`` is left alone -- only its rendering
     changes -- which matters because tab titles double as lookup keys and a tag
     pill's text is the tag itself.
 
+    Both cases are set, not just capitals: switching from an uppercase theme to
+    a mixed-case one has to be able to undo what the first one did, and a
+    widget's font keeps whatever capitalization was last written to it.
+
+    Only widgets that disagree with the theme are touched. ``setFont`` marks a
+    widget's font as its own and stops it inheriting the application's, so a
+    theme that never asked for capitals leaves every font exactly as Qt
+    resolved it.
+
     Args:
         widget: Any widget with a font. Applied to it and to every push button
             and tab bar beneath it.
+
+    Note:
+        Under a re-theme this must run **after** the new stylesheet is
+        installed. The QSS ``QWidget`` rule pins each control's family and
+        size, which is what stops the capitals reaching the console and the
+        input fields; run first, it has nothing to be pinned by.
     """
     from PySide6.QtGui import QFont
     from PySide6.QtWidgets import QPushButton, QTabBar
 
-    if not active_theme().font.uppercase:
-        return
+    wanted = (
+        QFont.Capitalization.AllUppercase
+        if active_theme().font.uppercase
+        else QFont.Capitalization.MixedCase
+    )
     targets = [widget]
     targets += widget.findChildren(QPushButton)
     targets += widget.findChildren(QTabBar)
     for target in targets:
         font = target.font()
-        font.setCapitalization(QFont.Capitalization.AllUppercase)
+        if font.capitalization() == wanted:
+            continue
+        font.setCapitalization(wanted)
         target.setFont(font)
 
 
@@ -882,12 +1051,12 @@ QStackedWidget > QWidget {
 QWidget#tagBar {
     background-color: $bg_topbar;
     color: $text_on_topbar;
-    border-bottom: $shape_border_width solid $border_panel;
+    border-bottom: $shape_border_width_panel $shape_border_style_panel $border_panel;
 }
 /* Sidebar */
 QWidget#sidebar {
     background-color: $bg_sidebar;
-    border-right: $shape_border_width solid $border_subtle;
+    border-right: $shape_border_width_panel $shape_border_style_panel $border_subtle;
 }
 QWidget#sidebar QLineEdit {
     background-color: $bg_field;
@@ -914,7 +1083,7 @@ QTreeWidget::item:selected {
 /* Splitter */
 QSplitter::handle:horizontal {
     background-color: $bg_app;
-    border-left: $shape_border_width solid $border_subtle;
+    border-left: $shape_border_width_panel $shape_border_style_panel $border_subtle;
 }
 QSplitter::handle:horizontal:hover {
     background-color: $accent_soft;
@@ -929,7 +1098,7 @@ QTabWidget::pane {
    page is therefore drawn by the page itself -- see ToolPage._build_ui. */
 QTabBar::tab {
     background-color: $bg_tab;
-    border: $shape_border_width $shape_border_style $border_tab;
+    border: $shape_border_width_control $shape_border_style_control $border_tab;
     border-bottom: none;
     border-top-left-radius: $shape_radius_control;
     border-top-right-radius: $shape_radius_control;
@@ -939,6 +1108,11 @@ QTabBar::tab {
 QTabBar::tab:selected {
     background-color: $bg_tab_selected;
     color: $text_tab_selected;
+    font-weight: bold;
+    /* Wider than the tab's own border, so the cap reads as a marker rather
+       than as an edge. The extra pixel comes out of the tab's content box --
+       see the note on the focus ring, which pays the same cost. */
+    border-top: $shape_border_width_emphasis $shape_border_style_control $border_tab_selected;
 }
 /* Close affordance installed by MainWindow; Qt's built-in one is unusable here
    because styling QTabBar::tab stops it being painted on the selected tab and
@@ -957,8 +1131,8 @@ QToolButton#tabCloseButton:pressed {
 /* Buttons */
 QPushButton {
     background-color: $bg_button;
-    border: $shape_border_width $shape_border_style $border_button;
-    border-radius: $shape_radius_control;
+    border: $shape_border_width_control $shape_border_style_control $border_button;
+    border-radius: $shape_radius_button;
     padding: 4px 14px;
     color: $text_button;
     min-height: 26px;
@@ -1002,32 +1176,41 @@ QPushButton#stop_btn:hover {
 /* Inputs */
 QLineEdit {
     background-color: $bg_field;
-    border: $shape_border_width solid $border_field;
+    border: $shape_border_width_field $shape_border_style_field $border_field;
     border-radius: $shape_radius_control;
     padding: 4px 8px;
     min-height: 24px;
 }
+/* A focus ring wider than the field's own border adds to the widget's size
+   hint -- 2px of hint per 1px of ring, measured. Whether that shows as the
+   field nudging taller on focus or as its content box tightening depends on
+   what the surrounding layout is free to do. One pixel is not worth a second
+   set of paddings to cancel; a theme that objects sets this equal to
+   `shape.border_width_field` and marks focus by colour alone. */
 QLineEdit:focus {
     border-color: $border_focus;
+    border-width: $shape_border_width_focus;
 }
 QTextEdit {
     background-color: $bg_field;
-    border: $shape_border_width solid $border_field;
+    border: $shape_border_width_field $shape_border_style_field $border_field;
     border-radius: $shape_radius_control;
     padding: 4px 8px;
 }
 QTextEdit:focus {
     border-color: $border_focus;
+    border-width: $shape_border_width_focus;
 }
 QSpinBox, QDoubleSpinBox {
     background-color: $bg_field;
-    border: $shape_border_width solid $border_field;
+    border: $shape_border_width_field $shape_border_style_field $border_field;
     border-radius: $shape_radius_control;
     padding: 3px 8px 3px 8px;
     min-height: 26px;
 }
 QSpinBox:focus, QDoubleSpinBox:focus {
     border-color: $border_focus;
+    border-width: $shape_border_width_focus;
 }
 QSpinBox::up-button, QDoubleSpinBox::up-button,
 QSpinBox::down-button, QDoubleSpinBox::down-button {
@@ -1037,13 +1220,14 @@ QSpinBox::down-button, QDoubleSpinBox::down-button {
 }
 QComboBox {
     background-color: $bg_field;
-    border: $shape_border_width solid $border_field;
+    border: $shape_border_width_field $shape_border_style_field $border_field;
     border-radius: $shape_radius_control;
     padding: 3px 8px;
     min-height: 26px;
 }
 QComboBox:focus {
     border-color: $border_focus;
+    border-width: $shape_border_width_focus;
 }
 QComboBox::drop-down {
     border: none;
@@ -1051,7 +1235,7 @@ QComboBox::drop-down {
 }
 QComboBox QAbstractItemView {
     background-color: $bg_field;
-    border: $shape_border_width solid $border_field;
+    border: $shape_border_width_field $shape_border_style_field $border_field;
     selection-background-color: $accent_soft;
     selection-color: $text_primary;
     outline: none;
@@ -1063,13 +1247,13 @@ QCheckBox {
 QCheckBox::indicator {
     width: 16px;
     height: 16px;
-    border: $shape_border_width_emphasis solid $border_field;
+    border: $shape_border_width_emphasis $shape_border_style_field $border_field;
     border-radius: $shape_radius_small;
     background: $bg_field;
 }
 QCheckBox::indicator:checked {
-    background-color: $accent;
-    border-color: $accent;
+    background-color: $accent_check;
+    border-color: $accent_check;
 }
 /* Progress */
 QProgressBar {
@@ -1084,7 +1268,7 @@ QProgressBar::chunk {
 /* Table */
 QTableWidget {
     background-color: $bg_table;
-    border: $shape_border_width solid $border_subtle;
+    border: $shape_border_width_panel $shape_border_style_panel $border_subtle;
     border-radius: $shape_radius_panel;
     gridline-color: $bg_gridline;
     outline: none;
@@ -1092,7 +1276,7 @@ QTableWidget {
 QHeaderView::section {
     background-color: $bg_header;
     border: none;
-    border-bottom: $shape_border_width solid $border_subtle;
+    border-bottom: $shape_border_width_panel $shape_border_style_panel $border_subtle;
     padding: 6px 8px;
     font-weight: bold;
     color: $text_muted;
@@ -1103,6 +1287,22 @@ QTableWidget::item {
 QTableWidget::item:selected {
     background-color: $accent_soft;
     color: $text_primary;
+}
+/* The check column in the history table. Left to the platform style it is a
+   bare tick drawn in the text colour -- no box, no fill, and nothing like the
+   QCheckBox a form puts three inches away. These rules are the same ones the
+   QCheckBox indicator gets, so a check mark means the same thing to the eye
+   wherever it appears. */
+QTableWidget::indicator {
+    width: 16px;
+    height: 16px;
+    border: $shape_border_width_emphasis $shape_border_style_field $border_field;
+    border-radius: $shape_radius_small;
+    background: $bg_field;
+}
+QTableWidget::indicator:checked {
+    background-color: $accent_check;
+    border-color: $accent_check;
 }
 /* Scrollbars */
 QScrollBar:vertical {

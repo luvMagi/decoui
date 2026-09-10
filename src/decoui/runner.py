@@ -24,15 +24,21 @@ from collections.abc import Sequence
 from typing import Callable
 
 from .decorators import _TOOL_ATTR, _TOOLSET_ATTR
+from .i18n import LANGUAGE_SETTING, active_language, set_language, t
+from .tool_i18n import load_catalogue
 from .theme import (
     DEFAULT_THEME_ID,
+    FONT_FAMILY_SETTING,
     THEME_SETTING,
     Theme,
     discover_themes,
+    parse_font_family,
     render_stylesheet,
     resolve_theme,
     set_active_theme,
     set_active_theme_dir,
+    theme_font,
+    with_font_family,
 )
 from .registry import build_tree
 from .storage.db import get_setting, init_db, set_db_path
@@ -45,6 +51,8 @@ def gui_main(
     toolsets: Sequence[type] | None = None,
     theme: str | None = None,
     theme_dir: str | Path | None = None,
+    language: str | None = None,
+    i18n_dir: str | Path | None = None,
 ) -> None:
     """Launch the decoui GUI application.
 
@@ -93,6 +101,21 @@ def gui_main(
         theme_dir: Directory scanned for user-supplied ``*.json`` themes.
             Defaults to ``~/.decoui/themes``. A missing directory is fine and
             is not created.
+        language: Code for the language decoui's **own** interface is drawn in
+            -- Run, Stop, the history columns. Like ``theme``, this is the
+            application's default and the user's choice in Settings wins over
+            it. A tool's own label, description and docstring are never
+            translated: they belong to the application, not to decoui.
+            Defaults to English.
+        i18n_dir: Directory holding this application's **own** translations,
+            one ``<language>.json`` per language. It covers the labels,
+            descriptions and field text written into ``@toolset`` and ``@tool``
+            -- text decoui cannot translate from its own catalogues, having
+            never seen it. See :mod:`decoui.tool_i18n` for the file's shape and
+            for why it cannot be done in the decorator instead.
+
+            A missing directory, or a missing file for the running language, is
+            not an error: the strings written in the source are used.
 
     Raises:
         RuntimeError: If no @toolset class is visible in the calling namespace,
@@ -126,11 +149,27 @@ def gui_main(
     app = QApplication.instance() or QApplication(sys.argv)
     app.setWindowIcon(QIcon(str(_icon_path())))
 
-    # The database comes first: the user's theme choice lives in it. The theme
-    # is then applied before anything is built, because decoui never re-themes
-    # a running window -- widgets read their colours as they are constructed.
+    # The database comes first: the user's theme and language choices live in
+    # it. Both are applied before anything is built, because widgets read their
+    # text and the colours they ink themselves with as they are constructed.
+    # The theme can be swapped later (ui/retheme.py); the language cannot.
     init_db()
+    # Language before the theme, and both before anything is built: the theme's
+    # own failure dialog is written in decoui's interface language, so the
+    # language has to be settled before there is anything to report.
+    set_language(get_setting(LANGUAGE_SETTING) or language)
     problems = _apply_startup_theme(app, theme, theme_dir)
+
+    # After the language and before the tree: build_tree() is what applies the
+    # catalogue, and it needs the language settled to know which file to read.
+    problems += [
+        StartupProblem(
+            source=t("tool_i18n.problem_source"),
+            summary=t("tool_i18n.problem_summary"),
+            detail=detail,
+        )
+        for detail in load_catalogue(i18n_dir, active_language())
+    ]
 
     tree = build_tree(*toolset_classes)
 
@@ -221,8 +260,8 @@ def _apply_startup_theme(
         active = _builtin()[DEFAULT_THEME_ID]
         _apply_theme(app, active)
         return [StartupProblem(
-            source="Themes",
-            summary="theme loading failed; falling back to the light theme",
+            source=t("theme.problem_source"),
+            summary=t("theme.problem_summary"),
             detail=traceback.format_exc(),
         )]
 
@@ -360,11 +399,8 @@ def _show_startup_problems(problems: list[StartupProblem], parent=None) -> None:
 
     box = QMessageBox(parent)
     box.setIcon(QMessageBox.Icon.Warning)
-    box.setWindowTitle("Startup problems")
-    box.setText(
-        f"{len(problems)} startup step(s) failed.\n"
-        f"The application is running without them."
-    )
+    box.setWindowTitle(t("startup.title"))
+    box.setText(t("startup.text", count=len(problems)))
     box.setInformativeText(
         "\n".join(f"• {problem.source}\n    {problem.summary}" for problem in problems)
     )
@@ -394,32 +430,33 @@ def _callable_name(target: Callable) -> str:
 def _apply_fonts(app, theme: Theme) -> None:
     """Set the application font from the theme.
 
-    The families are tried in order and Qt falls back through them, so the same
-    theme renders on Windows, macOS and Linux without per-platform code.
-
     Args:
         app: The QApplication to configure.
         theme: The theme supplying the font.
     """
-    from PySide6.QtGui import QFont
-    ui_font = QFont()
-    ui_font.setFamilies(list(theme.font.family))
-    ui_font.setPointSize(theme.font.size_pt)
-    app.setFont(ui_font)
+    app.setFont(theme_font(theme))
 
 
 def _apply_theme(app, theme: Theme) -> None:
     """Install a theme: its stylesheet, its font, and the record of what is live.
 
-    Called once, before any widget exists. decoui does not re-theme a running
-    application -- widgets that style themselves in code read the theme at
-    construction time, so a swap would leave them stale. Changing theme means
-    restarting.
+    This is the startup path, running before any widget exists. Changing theme
+    later goes through :func:`decoui.ui.retheme.retheme_application`, which does
+    the same three things and then walks the open windows -- widgets that style
+    themselves in code have to be told, because a stylesheet swap does not reach
+    what they set on themselves.
 
     Args:
         app: The QApplication to configure.
-        theme: The theme to apply.
+        theme: The theme to apply, before the user's font override is laid over
+            it.
     """
+    # Applied here rather than where the theme was resolved, so that one Theme
+    # object -- the overridden one -- is what the stylesheet, the application
+    # font and every widget that reads active_theme() all see. Overriding after
+    # any of those had already been handed the original would leave the window
+    # in two fonts at once.
+    theme = with_font_family(theme, parse_font_family(get_setting(FONT_FAMILY_SETTING)))
     set_active_theme(theme)
     _apply_fonts(app, theme)
     app.setStyleSheet(render_stylesheet(theme))

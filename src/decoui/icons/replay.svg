@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <!-- The hooked return arrow: out to the right, round, and back to a head on
+       the left. -->
+  <g fill="none" stroke="currentColor" stroke-width="2.4"
+     stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3.4 9.6 L15.2 9.6 A4.8 4.8 0 0 1 15.2 19.2 L8.6 19.2"/>
+    <path d="M7.8 5.2 L3.2 9.6 L7.8 14"/>
+  </g>
+</svg>

@@ -2,9 +2,13 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QLineEdit, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget
 
+from ..i18n import t
+from ..theme import active_theme
 from ..registry import ToolInfo, ToolSetInfo
+from .icons import theme_icon
 
 
 class NavTree(QWidget):
@@ -33,18 +37,57 @@ class NavTree(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         self._search = QLineEdit(self)
-        self._search.setPlaceholderText("🔍 Search tools...")
+        self._search.setPlaceholderText(t("nav.search_placeholder"))
         self._search.textChanged.connect(self._filter)
+        # addAction, not a character in the placeholder: a placeholder is text
+        # and disappears the moment anything is typed, which took the magnifier
+        # with it. A leading action is part of the field and stays put.
+        self._search_icon = self._search.addAction(
+            theme_icon("search", "text.muted", ratio=self.devicePixelRatioF()),
+            QLineEdit.ActionPosition.LeadingPosition,
+        )
         layout.addWidget(self._search)
 
         self._tw = QTreeWidget(self)
         self._tw.setHeaderHidden(True)
         self._tw.setIndentation(max(1, self._tw.indentation() // 2))
+        self._apply_selection_palette()
         self._tw.itemClicked.connect(self._on_item_clicked)
         self._tw.currentItemChanged.connect(self._on_current_changed)
         layout.addWidget(self._tw)
 
         self._populate()
+
+    def retheme(self) -> None:
+        """Redraw the parts of the sidebar no stylesheet reaches.
+
+        The magnifier is a pixmap, and the selection palette is read by the
+        platform style rather than by QSS. Everything else in the sidebar is
+        dressed by the application stylesheet -- see :mod:`decoui.ui.retheme`.
+        """
+        self._search_icon.setIcon(
+            theme_icon("search", "text.muted", ratio=self.devicePixelRatioF())
+        )
+        self._apply_selection_palette()
+
+    def _apply_selection_palette(self) -> None:
+        """Point the tree's Highlight role at the colours QSS already uses.
+
+        The row's fill and ink come from ``QTreeWidget::item:selected``, but the
+        platform style also paints the current row's focus outline, and it takes
+        that from the palette rather than from the stylesheet. Left alone it is
+        Qt's own highlight blue -- which showed up as a bright four-cornered
+        box in the indent column of whichever tool was selected, in a colour no
+        theme had chosen. Setting the role to the same colour QSS fills the row
+        with makes the outline land invisibly on top of it.
+        """
+        colors = active_theme().colors
+        palette = self._tw.palette()
+        palette.setColor(QPalette.ColorRole.Highlight, QColor(colors["bg.tree_selected"]))
+        palette.setColor(
+            QPalette.ColorRole.HighlightedText, QColor(colors["text.on_sidebar_selected"])
+        )
+        self._tw.setPalette(palette)
 
     def _populate(self):
         """Rebuild the visible rows from the search text and active tags."""

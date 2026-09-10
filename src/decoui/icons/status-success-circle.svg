@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <!-- A filled disc, for the locales that mark a pass with a circle rather
+       than with a tick. Filled rather than stroked: at 18px a ring reads as an
+       empty state, and an empty circle is what those same readers use for the
+       opposite of filled-in. -->
+  <circle cx="12" cy="12" r="7.2" fill="currentColor"/>
+</svg>
