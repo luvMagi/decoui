@@ -21,7 +21,7 @@
 6. [Async Execution Engine](#6-async-execution-engine)
 7. [Data Storage](#7-data-storage)
 8. [History Page](#8-history-page)
-9. [Theme & Styling](#9-theme--styling)
+9. [Theming](#9-theming)
 10. [Usage Examples](#10-usage-examples)
 11. [Tech Stack](#11-tech-stack)
 
@@ -49,6 +49,7 @@ decoui/
 ├── decorators.py        # @toolset / @tool decorator definitions
 ├── registry.py          # Annotation scanning, ToolTree construction
 ├── widget_builder.py    # Type annotation → Widget mapping
+├── theme.py             # Theme tokens, JSON loading, stylesheet template
 ├── engine/
 │   ├── worker.py        # QRunnable + stdout/logging capture
 │   └── executor.py      # Execution scheduling, record lifecycle
@@ -61,9 +62,11 @@ decoui/
 │   ├── tag_bar.py       # Tag filter pill buttons
 │   ├── tool_page.py     # Parameter form + output console
 │   ├── history_page.py  # Execution history list + detail view
+│   ├── settings_dialog.py  # Theme picker
 │   └── log_window.py    # Shared resizable log viewer window
+├── themes/              # Built-in themes, one JSON each (bundled in wheel)
 ├── icon.png             # Application icon (bundled in wheel)
-└── runner.py            # gui_main() entry point + theme stylesheet
+└── runner.py            # gui_main() entry point; resolves and applies a theme
 ```
 
 | Module | Responsibility |
@@ -77,11 +80,13 @@ decoui/
 | `storage/models.py` | `ExecutionRecord`, `ExecutionParam`, `ExecutionLog` dataclasses |
 | `ui/main_window.py` | QSplitter layout; persistent sidebar; stacked history/tool-tab views; signal wiring |
 | `ui/nav_tree.py` | Two-layer tree; search; tag filtering; keyboard navigation |
-| `ui/tag_bar.py` | Pill-style checkable tag buttons |
+| `ui/tag_bar.py` | The window's top bar: pill-style tag buttons and the settings button |
 | `ui/tool_page.py` | Form generation; collapse animation; output console; Replay button |
 | `ui/history_page.py` | History table; filtering; checkboxes; detail panel; replay |
-| `ui/log_window.py` | Shared `LogWindow(QMainWindow)` + `LogEntry` namedtuple |
-| `runner.py` | `gui_main()` entry; font config; global QSS theme |
+| `ui/log_window.py` | Shared `LogWindow(QMainWindow)` + `LogEntry` namedtuple; console styling and log-level colours, both from the theme |
+| `ui/settings_dialog.py` | Theme picker; the only settings decoui offers |
+| `theme.py` | Token definitions, JSON theme loading and validation, stylesheet template, the active theme |
+| `runner.py` | `gui_main()` entry; theme discovery, resolution and application |
 
 ---
 
@@ -201,10 +206,17 @@ When annotations cannot be resolved (an alias only imported under `TYPE_CHECKING
 └──────────────────┴──────────────────────────────────────────────┘
 ```
 
-- The sidebar has a light blue-gray tint (`#f8faff`).
-- A 1 px separator line is provided by the `QSplitter` handle.
+- The sidebar's tint comes from the theme (`bg.sidebar`), the tool list inside
+  it from `bg.tree`.
+- The `QSplitter` handle is 6 px wide and draws a hairline inside it. The
+  divider looks thin but has something to aim at; left at Qt's default it read
+  as a fixed-width sidebar, because there was almost nothing to grab.
 - Default splitter ratio: 220 px sidebar / 880 px content.
 - The sidebar width is restored from `ui.sidebar.width` in `app_setting`.
+- The content area declares a minimum width of its own and is not collapsible.
+  A `QStackedWidget`'s minimum is the widest of **all** its pages, so without
+  this the History page's control rows fixed how far the divider could travel
+  even while a tool page was showing.
 - Tool pages open in movable, closable tabs. Closing a tab hides it without destroying its page or interrupting a running task; selecting the tool again restores the same page.
 - Right-clicking a tab opens **Close Tab**, **Close Others**, and **Close All** actions. **Close Others** keeps and activates the right-clicked tab, and is disabled when only one tab is open. **Close All** returns to the welcome page without destroying tool pages or interrupting running tasks.
 - History and the tabbed tool workspace remain separate pages in the outer `QStackedWidget`.
@@ -217,12 +229,25 @@ When annotations cannot be resolved (an alias only imported under `TYPE_CHECKING
 - Toolset description shown as a tooltip on hover.
 - Both mouse click and **arrow key navigation** emit `tool_selected`.
 
-### 5.3 Tag Bar
+### 5.3 Top Bar (TagBar)
 
-- Pill-shaped checkable buttons (`border-radius: 12px`).
+Despite the class name this is the window's top bar: it carries the tag filter
+and the settings button, which has nowhere else to live while decoui has no
+menu bar.
+
+- Pill-shaped checkable buttons, radius from `shape.radius_pill`.
 - **All** = clear all active tags (show everything).
 - Other tags: multi-select, AND semantics.
-- Fixed height 42 px to prevent layout stretch.
+- Fixed height 52 px so the band reads as a band.
+- The settings button sits in the **outer** layout, after the scrolling pill
+  area. Inside it, it would slide out of view as soon as an application
+  declared enough tags.
+- The bar paints its own band (`bg.topbar` plus a bottom border). Three widgets
+  had to be told to stay out of the way for that band to be continuous: the bar
+  itself needs a `paintEvent` (a plain `QWidget` subclass does not render a
+  stylesheet background), the scroll area paints through a separate viewport,
+  and the "Tags:" label otherwise inherits the generic `QWidget` rule and
+  punches a rectangle out of the band.
 
 ### 5.4 ToolPage
 
@@ -475,11 +500,18 @@ Filter: [All Tools ▼]  [All Status ▼]  [All time ▼]   [🔄 Refresh]
   [↩ Replay Params]  [📄 View Full Log]
 ```
 
+> The two control rows are held in horizontally scrolling strips. They do not
+> shrink -- their buttons are as wide as their labels, and a theme that renders
+> in capitals with extra tracking makes them wider still -- so in a plain layout
+> they are simply clipped at the content area's edge, putting Refresh and Clear
+> History out of reach.
+
 ### 8.2 Features
 
 | Feature | Detail |
 |---|---|
-| Tool filter | Dropdown shows `"ToolSet Label: Tool Label"` entries, sorted alphabetically. |
+| Close | Returns to the open tool tabs, or to the welcome page when none are open. The page fills the content area, so without this an application that went straight to History had no route back. |
+| Tool filter | Dropdown shows `"ToolSet Label: Tool Label"` entries, sorted alphabetically. Sized from a fixed character count, not from its longest entry -- tool labels come from the application, and a combo sized to them hands its author control over the window's minimum width. |
 | Status filter | success / error / running / cancelled |
 | Time filter | Today / Last 7 days / Last 30 days / All time |
 | Keyboard nav | Arrow keys change row and update the detail panel. |
@@ -491,24 +523,122 @@ Filter: [All Tools ▼]  [All Status ▼]  [All time ▼]   [🔄 Refresh]
 
 ---
 
-## 9. Theme & Styling
+## 9. Theming
 
-The global QSS stylesheet is applied in `runner._apply_theme()`.
+`theme.py` owns the whole visual layer. A theme is a set of named tokens that
+the application stylesheet is rendered from; nothing outside a theme decides a
+colour, a corner radius or a font.
 
-| Element | Style |
+### 9.1 What a theme is
+
+```
+Theme
+├── id / name          stable key + display name (see 9.5)
+├── colors   × 59      per part, not per application
+├── shape    ×  8      five radii, two border widths, one border style
+└── font     ×  8      family, size, tracking, mono pair, title, small, caps
+```
+
+A theme file is JSON, so a user can add one without writing Python:
+
+```json
+{ "version": 1, "id": "brand", "name": "Brand", "extends": "light",
+  "colors": { "accent": "#0f766e" }, "shape": { "shape.radius_control": 0 } }
+```
+
+`extends` names a **built-in** theme and copies the rest of its tokens. It
+always resolves against the theme shipped in the package, even when a user
+theme has taken over that id -- otherwise dropping one file into the theme
+directory could silently re-base somebody else's theme.
+
+### 9.2 Tokens are per part
+
+The first cut of this set was too coarse to be useful: one `bg.surface` painted
+the page, the buttons, every input and the table, and one `bg.sidebar` painted
+both the sidebar and the list inside it. A theme could recolour the window but
+could not make a button look different from a text field -- which is most of
+what separates one interface style from another.
+
+The set is therefore split by role. Notable pairs that exist only because the
+two halves must be able to move in opposite directions:
+
+| Token | Exists because |
 |---|---|
-| App background | `#f5f6fa` |
-| Sidebar | `#f8faff` with 1 px right border |
-| White surfaces (inputs, table, tree) | `#ffffff` |
-| Accent / selection | `#3b5bdb` (blue) |
-| Run button | `#2b9348` (green) |
-| Stop button | `#dc3545` (red) |
-| Tag bar pills | `border-radius: 12px`; checked = accent fill |
-| Console | `#1e1e1e` background — inline style overrides global QSS |
-| Scrollbars | 8 px, rounded handles, no arrow buttons |
-| SpinBox arrows | Hidden (`width: 0`) — users type values directly |
+| `bg.tree` vs `bg.sidebar` | a theme may inset a dark list into a light panel |
+| `text.on_sidebar` | ...which then needs its own ink |
+| `bg.tree_selected` vs `accent.soft` | a filled dark selection in the list, a light tint in dropdowns |
+| `text.on_success` / `on_danger` / `on_neutral` | a bright Run button needs dark text while Stop stays dark and needs light text |
+| `bg.topbar` + `text.on_topbar` | the top bar may be a dark band |
+| `bg.console` + `console.*` | the console is not necessarily dark |
 
-Font stack (set via `QFont.setFamilies`): **Consolas**, **Microsoft YaHei**, **Meiryo**, Segoe UI, sans-serif.
+### 9.3 Rendering
+
+`render_stylesheet()` fills a `string.Template`. The placeholder syntax is `$name`
+rather than `{name}`: QSS is full of braces and contains no `$`, so this is the
+only form that does not collide with the language itself. Dots in token names
+become underscores, since `$bg.app` would end at the dot.
+
+Widgets that style themselves in code -- status badges, tag pills, the console
+-- read `active_theme()` instead. `theme.py` keeps the applied theme in a module
+global, the same way `storage.db` keeps the database path; there is no need for
+anything more, because decoui never re-themes a running window.
+
+Two things QSS cannot express are handled through the font instead:
+
+- **Capitals.** Qt's stylesheet dialect has no `text-transform`, so
+  `font.uppercase` is applied with `QFont.setCapitalization`. The widgets' text
+  is never modified -- tab titles double as lookup keys.
+- **Bevels.** There are no gradients in this format, but `shape.border_style`
+  passes Qt's `outset` / `inset` / `ridge` / `groove` through, which draws a
+  raised or sunken edge from the border colour alone.
+
+### 9.4 Applied once, at startup
+
+`_apply_theme()` runs before any widget exists, and decoui never swaps a theme
+in a live window: widgets that read their colours at construction time would be
+left stale. The settings dialog records a choice and says a restart is needed.
+
+This is what keeps the mechanism small -- no re-style pass, no rebuild of open
+pages, and no risk to a tool that is running.
+
+### 9.5 Failure is never fatal
+
+A theme is presentation. Refusing to start an application over one would be out
+of all proportion, so:
+
+| Situation | Result |
+|---|---|
+| One theme file is invalid | Skipped; every other theme still loads |
+| The selected theme is invalid or missing | Falls back to the built-in light theme |
+| Either | Reported in the startup dialog, alongside any hook failures |
+
+The selection is stored **by id**, so renaming a theme does not lose it, and a
+selection that cannot be resolved is left in place rather than cleared -- the
+file may be missing only on this machine.
+
+### 9.6 The console does not follow everything
+
+The output area takes its background, border, monospace face and per-level
+colours from the theme, but it is expected to stay terminal-like: all four
+built-in themes give it a dark ground. Its level colours are tuned for that.
+
+### 9.7 Built-in themes
+
+| id | Look |
+|---|---|
+| `light` | The default. Rounded, blue accent. Reproduces the pre-theme stylesheet. |
+| `cockpit` | Olive chassis, near-black controls with phosphor labels, bevelled, capitals |
+| `nasa` | Cream chassis, dark top bar, deep green selections, capitals |
+| `jp-industrial` | Beige chassis, dark green tool list, orange accent and Run |
+
+The three panel themes are derived from reference renders by sampling them.
+They are recolours and re-geometries, not replicas: decoui has no header band,
+status lamps or bezel screws, and a theme cannot add any.
+
+Each is held to a contrast floor measured **pairwise against the default
+theme** rather than against an absolute. WCAG AA cannot be the bar here: the
+default theme predates any contrast requirement and misses AA on three pairs of
+its own, and rewriting its colours was not part of adding themes.
 
 ---
 

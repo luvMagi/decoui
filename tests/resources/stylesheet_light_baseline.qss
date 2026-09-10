@@ -1,0 +1,249 @@
+
+QWidget {
+    background-color: #f5f6fa;
+    color: #1e2128;
+}
+QMainWindow > QWidget,
+QStackedWidget > QWidget {
+    background-color: #ffffff;
+}
+/* Sidebar */
+QWidget#sidebar {
+    background-color: #f8faff;
+    border-right: 1px solid #e4e7ef;
+}
+QWidget#sidebar QLineEdit {
+    background-color: #ffffff;
+}
+/* Tree */
+QTreeWidget {
+    background-color: #f8faff;
+    border: none;
+    outline: none;
+    padding: 2px;
+}
+QTreeWidget::item {
+    padding: 4px 6px;
+    border-radius: 5px;
+}
+QTreeWidget::item:hover {
+    background-color: #edf0fb;
+}
+QTreeWidget::item:selected {
+    background-color: #dbe4ff;
+    color: #1e2128;
+}
+/* Splitter */
+QSplitter::handle:horizontal {
+    background-color: #e4e7ef;
+    width: 1px;
+}
+/* Tabs */
+QTabWidget::pane {
+    border: none;
+    border-top: 1px solid #e4e7ef;
+    background-color: #ffffff;
+}
+QTabBar::tab {
+    background-color: #eef1f7;
+    border: 1px solid #d9deea;
+    border-bottom: none;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+    padding: 7px 12px;
+    margin-right: 2px;
+}
+QTabBar::tab:selected {
+    background-color: #ffffff;
+    color: #3b5bdb;
+}
+/* Close affordance installed by MainWindow; Qt's built-in one is unusable here
+   because styling QTabBar::tab stops it being painted on the selected tab and
+   its position cannot be nudged in from the tab edge. */
+QToolButton#tabCloseButton {
+    background-color: transparent;
+    border: none;
+    border-radius: 3px;
+}
+QToolButton#tabCloseButton:hover {
+    background-color: #e4e7ef;
+}
+QToolButton#tabCloseButton:pressed {
+    background-color: #d0d5e0;
+}
+/* Buttons */
+QPushButton {
+    background-color: #ffffff;
+    border: 1px solid #d0d5e0;
+    border-radius: 6px;
+    padding: 4px 14px;
+    color: #344054;
+    min-height: 26px;
+}
+QPushButton:hover {
+    background-color: #f0f4ff;
+    border-color: #7c90cc;
+}
+QPushButton:pressed {
+    background-color: #e0e8ff;
+}
+QPushButton:checked {
+    background-color: #3b5bdb;
+    color: #ffffff;
+    border-color: #3b5bdb;
+}
+QPushButton:disabled {
+    color: #aab0bf;
+    border-color: #e4e7ef;
+    background-color: #f8f9fc;
+}
+QPushButton#run_btn {
+    background-color: #2b9348;
+    color: #ffffff;
+    border-color: #2b9348;
+    font-weight: bold;
+}
+QPushButton#run_btn:hover {
+    background-color: #218838;
+    border-color: #218838;
+}
+QPushButton#stop_btn {
+    background-color: #dc3545;
+    color: #ffffff;
+    border-color: #dc3545;
+}
+QPushButton#stop_btn:hover {
+    background-color: #c82333;
+    border-color: #c82333;
+}
+/* Inputs */
+QLineEdit {
+    background-color: #ffffff;
+    border: 1px solid #d0d5e0;
+    border-radius: 6px;
+    padding: 4px 8px;
+    min-height: 24px;
+}
+QLineEdit:focus {
+    border-color: #3b5bdb;
+}
+QTextEdit {
+    background-color: #ffffff;
+    border: 1px solid #d0d5e0;
+    border-radius: 6px;
+    padding: 4px 8px;
+}
+QTextEdit:focus {
+    border-color: #3b5bdb;
+}
+QSpinBox, QDoubleSpinBox {
+    background-color: #ffffff;
+    border: 1px solid #d0d5e0;
+    border-radius: 6px;
+    padding: 3px 8px 3px 8px;
+    min-height: 26px;
+}
+QSpinBox:focus, QDoubleSpinBox:focus {
+    border-color: #3b5bdb;
+}
+QSpinBox::up-button, QDoubleSpinBox::up-button,
+QSpinBox::down-button, QDoubleSpinBox::down-button {
+    width: 0;
+    border: none;
+    background: none;
+}
+QComboBox {
+    background-color: #ffffff;
+    border: 1px solid #d0d5e0;
+    border-radius: 6px;
+    padding: 3px 8px;
+    min-height: 26px;
+}
+QComboBox:focus {
+    border-color: #3b5bdb;
+}
+QComboBox::drop-down {
+    border: none;
+    width: 24px;
+}
+QComboBox QAbstractItemView {
+    background-color: #ffffff;
+    border: 1px solid #d0d5e0;
+    selection-background-color: #dbe4ff;
+    selection-color: #1e2128;
+    outline: none;
+}
+QCheckBox {
+    spacing: 6px;
+    background: transparent;
+}
+QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+    border: 1.5px solid #d0d5e0;
+    border-radius: 4px;
+    background: #ffffff;
+}
+QCheckBox::indicator:checked {
+    background-color: #3b5bdb;
+    border-color: #3b5bdb;
+}
+/* Progress */
+QProgressBar {
+    border: none;
+    border-radius: 2px;
+    background-color: #e4e7ef;
+}
+QProgressBar::chunk {
+    background-color: #3b5bdb;
+    border-radius: 2px;
+}
+/* Table */
+QTableWidget {
+    background-color: #ffffff;
+    border: 1px solid #e4e7ef;
+    border-radius: 8px;
+    gridline-color: #f0f2f8;
+    outline: none;
+}
+QHeaderView::section {
+    background-color: #f8f9fc;
+    border: none;
+    border-bottom: 1px solid #e4e7ef;
+    padding: 6px 8px;
+    font-weight: bold;
+    color: #667085;
+}
+QTableWidget::item {
+    padding: 4px 8px;
+}
+QTableWidget::item:selected {
+    background-color: #dbe4ff;
+    color: #1e2128;
+}
+/* Scrollbars */
+QScrollBar:vertical {
+    background: transparent;
+    width: 8px;
+    margin: 0;
+}
+QScrollBar::handle:vertical {
+    background: #c0c8d8;
+    border-radius: 4px;
+    min-height: 24px;
+}
+QScrollBar::handle:vertical:hover {
+    background: #8a96b0;
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+QScrollBar:horizontal {
+    background: transparent;
+    height: 8px;
+    margin: 0;
+}
+QScrollBar::handle:horizontal {
+    background: #c0c8d8;
+    border-radius: 4px;
+    min-width: 24px;
+}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }

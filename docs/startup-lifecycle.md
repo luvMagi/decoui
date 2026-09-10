@@ -1,6 +1,6 @@
 # Startup Lifecycle — Where to Load Data
 
-> Guide for tool authors · Applies to decoui `0.2.0`+
+> Guide for tool authors · Applies to decoui `0.2.0`+ · theme step added in `0.4.0`
 
 Reading initial values from a config file, a database, or a service is the common case, not an edge case. decoui gives you three places to do it and they are **not** interchangeable. This page says which one to use and what each guarantees.
 
@@ -17,18 +17,20 @@ If you only read one thing: **declare state in `__init__`, load it in `on_startu
 
 ── gui_main() ──────────────────────────────────────────────
  1  set_db_path()               db location fixed
- 2  scan caller globals         collects @toolset CLASSES, not instances
+ 2  toolsets resolved           explicit list, or a scan of caller globals;
+                                @toolset CLASSES, not instances
  3  QApplication created        ← the app object exists from here
-    fonts + theme applied
  4  init_db()                   tables created; get_setting() usable
- 5  build_tree()                annotation scan + assist validation
- 6  on_startup()                ← APPLICATION hook
- 7  cls() for every toolset     ← `self` exists from here
- 8  ToolSet.on_startup()        ← PER-TOOLSET hook
- 9  MainWindow built            sidebar only; no ToolPage yet
-10  window.show()               the window appears
-11  problem dialog, if any
-12  app.exec()                  ← the event loop starts
+ 5  theme resolved + applied    stored choice > gui_main(theme=) > light;
+                                a broken theme falls back, never stops startup
+ 6  build_tree()                annotation scan + assist validation
+ 7  on_startup()                ← APPLICATION hook
+ 8  cls() for every toolset     ← `self` exists from here
+ 9  ToolSet.on_startup()        ← PER-TOOLSET hook
+10  MainWindow built            sidebar only; no ToolPage yet
+11  window.show()               the window appears
+12  problem dialog, if any      theme problems are reported here too
+13  app.exec()                  ← the event loop starts
 
 ── later, when the user clicks a tool ──────────────────────
     ToolPage.__init__ → defaults / completions / cascade become live
@@ -52,7 +54,7 @@ A fourth exists for form values specifically: `@tool(defaults=...)`, evaluated w
 
 ### 3.1 The event loop is not running yet
 
-`QApplication` exists at step 3, but `app.exec()` is at step 12. Inside either hook:
+`QApplication` exists at step 3, but `app.exec()` is at step 13. Inside either hook:
 
 - **`QTimer` does not fire**, queued signals are not delivered, and `QThreadPool` results never arrive. Starting a background thread and waiting for its result deadlocks your startup.
 - **There is no main window**, so a dialog you open yourself has no parent and blocks startup behind a frame the user did not expect. To report a problem, just `raise` — decoui collects it and shows one dialog after the window appears (step 11).
@@ -166,11 +168,29 @@ Do not catch and swallow errors inside a hook just to keep the app quiet. Raisin
 
 ---
 
+## 5.1 Why the theme is resolved before anything is built
+
+The database comes first because the user's theme choice lives in it, and the
+theme is applied before the first widget exists because decoui never re-themes
+a running window -- widgets that style themselves in code read their colours as
+they are constructed, and a later swap would leave them stale. Changing theme
+therefore takes effect on the next launch.
+
+A theme is presentation, so nothing about it is fatal: an unreadable file is
+skipped, an unresolvable selection falls back to the built-in light theme, and
+both are reported in the same dialog as hook failures at step 12.
+
+---
+
 ## 6. Gotchas worth knowing
 
 - **Order between toolsets is alphabetical**, because `build_tree()` sorts by label. Do not depend on it. If toolset A needs something toolset B produced, that something belongs in the application hook.
 - **The hooks are a `gui_main()` guarantee.** Constructing `MainWindow(tree)` directly — as the tests do — falls back to lazy instantiation, and `on_startup()` methods are never called.
 - **A `@tool` named `on_startup` stays a tool.** decoui checks for the tool marker first, so it is never called as a hook.
+- **Logging needs a level.** decoui attaches its console handler to the root
+  logger but does not change that logger's level, and an unconfigured root
+  logger filters everything below WARNING. A tool that calls `logging.info()`
+  produces nothing until the application has called `logging.basicConfig()`.
 - **Eager instantiation is observable.** A toolset `__init__` with side effects (writing a file, printing) now runs at startup rather than on first click. This changed in `0.2.0`.
 - **`get_setting()` is safe in a hook, not in a signature default.** `init_db()` runs at step 4, before both hooks, but long after import time.
 
