@@ -75,16 +75,16 @@
   },
   "font": {
     "family": [
-      "MS Gothic",
-      "Osaka-Mono",
-      "DejaVu Sans Mono",
-      "monospace"
+      "Tahoma",
+      "Yu Gothic UI",
+      "DejaVu Sans",
+      "sans-serif"
     ],
     "size_pt": 10,
-    "letter_spacing": 0.4,
+    "letter_spacing": 1,
     "mono_family": [
-      "MS Gothic",
-      "Osaka-Mono",
+      "Cascadia Mono",
+      "Consolas",
       "DejaVu Sans Mono",
       "monospace"
     ],
