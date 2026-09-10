@@ -38,6 +38,7 @@ import json
 import re
 import traceback
 from dataclasses import dataclass
+from functools import cache
 from importlib import resources
 from pathlib import Path
 from string import Template
@@ -49,6 +50,12 @@ SCHEMA_VERSION = 1
 #: The theme used when nothing else applies, and the one every fallback lands
 #: on. It is a built-in, so it is always available.
 DEFAULT_THEME_ID = "light"
+
+#: Settings key holding the theme id the user chose. It lives here rather than
+#: beside the dialog that writes it because gui_main() reads the same key at
+#: startup, and two spellings of one key fail silently: the choice is saved and
+#: then never found again.
+THEME_SETTING = "ui.theme"
 
 #: A theme id: lowercase, digits and hyphens, starting with an alphanumeric.
 _ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -139,8 +146,11 @@ COLOR_TOKENS: frozenset[str] = frozenset({
 SHAPE_TOKENS: frozenset[str] = frozenset({
     "shape.radius_bar",       # progress bar and its chunk
     "shape.radius_small",     # check indicator, tab close button, scrollbars
-    "shape.radius_control",   # buttons, inputs, dropdowns, tabs, tree rows
-    "shape.radius_panel",     # tables, console, description box
+    # The console is a control, not a panel: it sits in the same column as the
+    # buttons above it and is read as one framed element with them, so it
+    # follows their radius rather than the table's.
+    "shape.radius_control",   # buttons, inputs, dropdowns, tabs, tree rows, console
+    "shape.radius_panel",     # tables and the description box
     "shape.radius_pill",      # tag pills and status badges
     "shape.border_width",
     "shape.border_width_emphasis",
@@ -410,6 +420,13 @@ def _check_font(values: Any, source: str, *, complete: bool) -> dict[str, Any]:
             or values[key] <= 0
         ):
             raise ThemeError(f"{source}: font['{key}'] must be a positive number")
+    # Checked separately from the sizes: 0 means "leave the font alone" and a
+    # negative value tightens, so the positive-number rule does not apply.
+    if "letter_spacing" in values and (
+        isinstance(values["letter_spacing"], bool)
+        or not isinstance(values["letter_spacing"], (int, float))
+    ):
+        raise ThemeError(f"{source}: font['letter_spacing'] must be a number")
     return values
 
 
@@ -517,15 +534,27 @@ def load_theme(path: str | Path, *, encoding: str = "utf-8") -> Theme:
         The theme it defines.
 
     Raises:
-        ThemeError: If the file is unreadable, is not JSON, or is not a valid
-            theme. Callers on the startup path must catch this -- a broken
-            theme is never a reason to refuse to start.
+        ThemeError: If the file is unreadable, is not text in ``encoding``, is
+            not JSON, or is not a valid theme. Callers on the startup path must
+            catch this -- a broken theme is never a reason to refuse to start.
+            Nothing else escapes: every way one file can be bad has to arrive
+            as a ThemeError, or discover_themes() loses the whole directory
+            instead of skipping the one file.
     """
     source = str(path)
     try:
         raw = Path(path).read_text(encoding=encoding)
     except OSError as exc:
         raise ThemeError(f"{source}: cannot be read ({exc})") from exc
+    except UnicodeDecodeError as exc:
+        # The common way in: an editor that defaults to the system code page
+        # rather than UTF-8, which only shows up once the file has a non-ASCII
+        # character in it -- typically an accented theme name.
+        raise ThemeError(
+            f"{source}: is not valid {encoding} text ({exc}); save it as UTF-8"
+        ) from exc
+    except LookupError as exc:
+        raise ThemeError(f"{source}: unknown encoding {encoding!r} ({exc})") from exc
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError as exc:
@@ -533,8 +562,13 @@ def load_theme(path: str | Path, *, encoding: str = "utf-8") -> Theme:
     return _theme_from_payload(payload, source)
 
 
-def builtin_themes() -> dict[str, Theme]:
-    """Return the themes shipped inside the package.
+@cache
+def _builtin_themes() -> dict[str, Theme]:
+    """Read and validate the bundled themes once per process.
+
+    The files ship inside the package, so they cannot change while decoui is
+    running and there is nothing to invalidate. Callers go through
+    :func:`builtin_themes`, which hands out a copy.
 
     Returns:
         Theme id to Theme, for every ``.json`` under ``decoui/themes``.
@@ -552,6 +586,22 @@ def builtin_themes() -> dict[str, Theme]:
         theme = _theme_from_payload(payload, f"<built-in {entry.name}>")
         themes[theme.id] = theme
     return themes
+
+
+def builtin_themes() -> dict[str, Theme]:
+    """Return the themes shipped inside the package.
+
+    Returns:
+        A fresh mapping of theme id to Theme. The mapping is the caller's --
+        :func:`discover_themes` adds the user's themes straight into it -- but
+        the Theme objects in it are shared and must be treated as read-only.
+        Nothing in decoui writes to a Theme: ``extends`` copies the parent's
+        ``colors`` and ``shape`` before overriding them.
+
+    Raises:
+        ThemeError: If a bundled theme is invalid.
+    """
+    return dict(_builtin_themes())
 
 
 @dataclass(frozen=True)
@@ -586,6 +636,26 @@ def default_theme_dir() -> Path:
     return Path.home() / ".decoui" / "themes"
 
 
+def _user_theme_dir(theme_dir: str | Path | None) -> Path:
+    """Resolve the directory a caller named for its user themes.
+
+    ``~`` is expanded, because the obvious thing to pass -- and what the README
+    shows -- is the string ``"~/.decoui/themes"``. Without this it would become
+    a *relative* ``./~/.decoui/themes``, which simply does not exist, and a
+    missing theme directory is not an error: the user would get no themes and no
+    message saying why.
+
+    Args:
+        theme_dir: What the caller passed, or None for the default.
+
+    Returns:
+        The directory to scan.
+    """
+    if theme_dir is None:
+        return default_theme_dir()
+    return Path(theme_dir).expanduser()
+
+
 def discover_themes(
     theme_dir: str | Path | None = None,
 ) -> tuple[dict[str, Theme], list[ThemeProblem]]:
@@ -598,14 +668,16 @@ def discover_themes(
     Returns:
         A ``(themes, problems)`` pair. ``themes`` maps id to Theme and always
         contains at least the built-ins. ``problems`` lists the files that
-        could not be used and the ids that were shadowed -- never a reason to
-        stop, only something to tell the user about afterwards.
+        could not be used and the ids two *user* files both claimed -- never a
+        reason to stop, only something to tell the user about afterwards.
 
     Note:
         A user theme with the same id as a built-in replaces it in this mapping,
-        but ``extends`` still resolves against the built-in (see
-        :func:`load_theme`). Otherwise dropping a file into this directory could
-        silently change what somebody else's theme inherits.
+        silently: that is the supported way to re-skin a built-in, and reporting
+        it would mean a dialog on every launch for as long as the file exists.
+        ``extends`` still resolves against the built-in (see :func:`load_theme`),
+        so dropping a file into this directory cannot change what somebody
+        else's theme inherits.
 
         Files are read in filename order so two themes claiming one id resolve
         the same way on every run.
@@ -614,7 +686,7 @@ def discover_themes(
     origins = {theme_id: "built-in" for theme_id in themes}
     problems: list[ThemeProblem] = []
 
-    directory = Path(theme_dir) if theme_dir is not None else default_theme_dir()
+    directory = _user_theme_dir(theme_dir)
     if not directory.is_dir():
         return themes, problems
 
@@ -628,11 +700,15 @@ def discover_themes(
                 detail=traceback.format_exc(),
             ))
             continue
-        if theme.id in themes:
+        # Taking over a built-in id is a supported thing to do -- it is how a
+        # user re-skins the theme decoui starts on -- so it is silent. Two of
+        # the user's *own* files claiming one id is not: one of them loses, the
+        # choice is alphabetical, and nothing else would say which.
+        if theme.id in themes and origins[theme.id] != "built-in":
             problems.append(ThemeProblem(
                 source=f'Theme "{theme.id}"',
                 summary=(
-                    f"{path} replaces the {origins[theme.id]} theme with the "
+                    f"{path} replaces {origins[theme.id]}, which claims the "
                     f"same id"
                 ),
                 detail=f"previous: {origins[theme.id]}\nreplacement: {path}",
@@ -695,7 +771,9 @@ def set_active_theme_dir(theme_dir: str | Path | None) -> None:
         theme_dir: The directory gui_main() was given, or None for the default.
     """
     global _ACTIVE_THEME_DIR
-    _ACTIVE_THEME_DIR = Path(theme_dir) if theme_dir is not None else None
+    # Expanded here too, so the settings dialog scans the directory
+    # discover_themes() actually read rather than the literal string.
+    _ACTIVE_THEME_DIR = Path(theme_dir).expanduser() if theme_dir is not None else None
 
 
 def active_theme_dir() -> Path:
@@ -729,12 +807,17 @@ def active_theme() -> Theme:
     own -- status badges, tag pills -- and read their colours from here.
 
     Returns:
-        The theme set by :func:`set_active_theme`, or the built-in light theme
-        when nothing has been applied. The fallback matters for tests and for
-        any tool page built outside gui_main().
+        The theme set by :func:`set_active_theme`, or the built-in default when
+        nothing has been applied. The fallback matters for tests and for any
+        tool page built outside gui_main().
+
+    Note:
+        Called from the log console's per-line path, so the fallback reads the
+        cached built-ins directly rather than through :func:`builtin_themes`,
+        which would copy the mapping only to index one key out of it.
     """
     if _ACTIVE_THEME is None:
-        return builtin_themes()["light"]
+        return _builtin_themes()[DEFAULT_THEME_ID]
     return _ACTIVE_THEME
 
 

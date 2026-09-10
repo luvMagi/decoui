@@ -564,6 +564,9 @@ wherever its preferred face is missing.
   Without it, every token must be present.
 * `extends` always resolves against the theme decoui ships, even if another
   file has taken over that id — so one theme can never quietly re-base another.
+* Giving your theme the `id` of a built-in **replaces** it, with no warning —
+  that is how you re-skin `light` or `nasa`. Two of your *own* files claiming
+  one id is reported instead, because one of them silently loses.
 * Colours are `#rrggbb` only. There are no gradients: every token is one flat
   colour, so metallic and bevelled looks are out of reach.
 * Setting the `shape.radius_*` tokens to `0` squares the whole interface off.

@@ -153,6 +153,12 @@ class ToolPage(QWidget):
         self._widgets: dict[str, QWidget] = {}
         self._log_records: list[LogEntry] = []
         self._open_log_windows: list = []
+        # Read once, here: the theme is applied before any widget exists and is
+        # never swapped, and _append_log runs per output line -- rebuilding the
+        # level mapping there put a file read and a full theme validation on the
+        # GUI thread for every line the tool printed.
+        self._level_colors = level_colors()
+        self._default_color = default_color()
         self._assist_runner = assist_runner or AssistRunner()
         self._completions: dict[str, CompletionController] = {}
         self._cascade: CascadeController | None = None
@@ -523,7 +529,7 @@ class ToolPage(QWidget):
         """
         self._log_records.append(LogEntry(level, message))
 
-        color = level_colors().get(level, default_color())
+        color = self._level_colors.get(level, self._default_color)
         fmt = QTextCharFormat()
         fmt.setForeground(QColor(color))
         if level == "CRITICAL":
