@@ -36,6 +36,8 @@ from ..registry import ToolInfo, ToolSetInfo
 from ..storage.db import get_setting, set_setting
 from .history_page import HistoryPage
 from .nav_tree import NavTree
+from ..theme import apply_label_case
+from .settings_dialog import SettingsDialog
 from .tag_bar import TagBar
 from .tool_page import ToolPage
 
@@ -105,6 +107,11 @@ class MainWindow(QMainWindow):
 
         # Splitter
         self._splitter = QSplitter(Qt.Orientation.Horizontal, central)
+        # The default handle is a few pixels wide and the stylesheet paints it
+        # as a hairline, which leaves almost nothing to aim at. Widening the
+        # handle keeps the divider looking thin while giving the pointer a
+        # target it can actually hit; the :hover rule makes it discoverable.
+        self._splitter.setHandleWidth(6)
         outer.addWidget(self._splitter)
 
         # Sidebar
@@ -125,12 +132,25 @@ class MainWindow(QMainWindow):
 
         # Stacked widget (main area)
         self._stack = QStackedWidget(self._splitter)
+        # A QStackedWidget's minimum width is the widest of *all* its pages, so
+        # without this the History page's filter row fixed the minimum width of
+        # the content area -- and therefore capped how far the sidebar could be
+        # dragged -- even while a tool page was showing. Naming a minimum here
+        # lets the content area shrink; a page narrower than it wants simply
+        # clips, which is the user's own choice when they drag the divider.
+        self._stack.setMinimumWidth(400)
         self._splitter.addWidget(self._stack)
+        # ...and the content area must honour that minimum rather than being
+        # collapsed away entirely. A splitter ignores a child's minimum width
+        # while that child is collapsible, so without this the divider could be
+        # dragged all the way across and the tool page would vanish.
+        self._splitter.setCollapsible(1, False)
         self._splitter.setStretchFactor(1, 1)
 
         # History page
         self._history_page = HistoryPage(tool_labels, self._stack)
         self._history_page.replay_requested.connect(self._replay)
+        self._history_page.close_requested.connect(self._close_history)
         self._stack.addWidget(self._history_page)
 
         # Tool tabs
@@ -158,6 +178,20 @@ class MainWindow(QMainWindow):
         # Signals
         self._nav.tool_selected.connect(self._show_tool)
         self._tag_bar.tags_changed.connect(self._nav.set_active_tags)
+        self._tag_bar.settings_requested.connect(self._open_settings)
+
+        # Capitals, when the theme asks for them. Done after everything is
+        # built so it reaches the tag pills, the tab bar and every button.
+        apply_label_case(self)
+
+    def _open_settings(self) -> None:
+        """Open the settings dialog.
+
+        The dialog writes the chosen theme itself. Nothing is applied here:
+        decoui themes a window once, when it is built, so a change takes effect
+        on the next launch and the current window is deliberately left alone.
+        """
+        SettingsDialog(self).exec()
 
     def _get_instance(self, cls: type) -> object:
         """Return the shared instance for a registered toolset class."""
@@ -224,6 +258,18 @@ class MainWindow(QMainWindow):
             if tab_bar.tabButton(index, QTabBar.ButtonPosition.RightSide) is holder:
                 self._close_tool_tab(index)
                 return
+
+    def _close_history(self) -> None:
+        """Leave the history view for whatever the user was looking at.
+
+        Falls back to the welcome page when no tool tab is open, which is the
+        case this exists for: the history page filled the content area and the
+        only route out was opening a tool.
+        """
+        if self._tabs.count() > 0:
+            self._stack.setCurrentWidget(self._tabs)
+        else:
+            self._stack.setCurrentWidget(self._welcome)
 
     def _close_tool_tab(self, index: int) -> None:
         """Hide a tool tab while preserving its page and running task."""

@@ -6,6 +6,8 @@ from datetime import datetime, timedelta
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QFrame,
+    QScrollArea,
     QComboBox,
     QHBoxLayout,
     QHeaderView,
@@ -64,6 +66,7 @@ class HistoryPage(QWidget):
     re-running anything, so nothing is executed without the user pressing Run.
     """
     replay_requested = Signal(str, dict)  # (tool_id, param_map)
+    close_requested = Signal()           # leave the history view
 
     def __init__(self, tool_labels: dict[str, str], parent=None):
         """Build the history table and its filter row.
@@ -80,16 +83,65 @@ class HistoryPage(QWidget):
         self._build_ui()
         self.refresh()
 
+    def _control_strip(self, row: QHBoxLayout) -> QScrollArea:
+        """Wrap a row of controls so it scrolls instead of being clipped.
+
+        These rows do not shrink: their buttons are as wide as their labels, and
+        a theme that renders in capitals with extra tracking makes them wider
+        still. Left in a plain layout the row is simply cut off at the content
+        area's edge, which puts Refresh and Clear History out of reach. Scrolling
+        keeps every control reachable at any width.
+
+        Args:
+            row: The populated row layout.
+
+        Returns:
+            A borderless, transparent scroll area holding that row.
+        """
+        container = QWidget(self)
+        container.setLayout(row)
+        container.setStyleSheet("background: transparent;")
+
+        scroll = QScrollArea(self)
+        scroll.setWidget(container)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        scroll.viewport().setStyleSheet("background: transparent;")
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # Room for the horizontal bar, which only appears when it is needed.
+        scroll.setFixedHeight(container.sizeHint().height() + 12)
+        return scroll
+
     def _build_ui(self):
         """Assemble the filter row, the table and the detail strip."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
 
-        layout.addWidget(QLabel("<b>📜 Execution History</b>"))
+        # The page fills the whole content area, so it needs a way out of its
+        # own: opening History with no tool tab open used to leave the window
+        # with no route back at all.
+        header_row = QHBoxLayout()
+        header_row.addWidget(QLabel("<b>📜 Execution History</b>"))
+        header_row.addStretch()
+        close_btn = QPushButton("✕ Close", self)
+        close_btn.setToolTip("Return to the tool you were on")
+        close_btn.clicked.connect(self.close_requested)
+        header_row.addWidget(close_btn)
+        layout.addLayout(header_row)
 
         # ── Filter bar ────────────────────────────────────────────────────────
         filter_row = QHBoxLayout()
         self._tool_filter = QComboBox(self)
+        # Sized from a fixed character count rather than from its longest entry.
+        # Tool labels are written by the application, so left to itself this
+        # combo grows without limit and drags the whole page's minimum width
+        # along with it. The popup still shows every label in full.
+        self._tool_filter.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self._tool_filter.setMinimumContentsLength(14)
         self._tool_filter.addItem("All Tools", None)
         for tid, label in self._tool_labels.items():
             self._tool_filter.addItem(label, tid)
@@ -123,7 +175,7 @@ class HistoryPage(QWidget):
         filter_row.addWidget(self._db_size_label)
         filter_row.addWidget(self._clear_db_btn)
         filter_row.addWidget(refresh_btn)
-        layout.addLayout(filter_row)
+        layout.addWidget(self._control_strip(filter_row))
 
         # ── Selection action bar ──────────────────────────────────────────────
         sel_row = QHBoxLayout()
@@ -138,7 +190,7 @@ class HistoryPage(QWidget):
         sel_row.addWidget(sel_none_btn)
         sel_row.addStretch()
         sel_row.addWidget(self._delete_sel_btn)
-        layout.addLayout(sel_row)
+        layout.addWidget(self._control_strip(sel_row))
 
         # ── Table ─────────────────────────────────────────────────────────────
         self._table = QTableWidget(0, 6, self)

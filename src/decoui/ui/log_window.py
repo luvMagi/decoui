@@ -16,22 +16,67 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..theme import active_theme
+
 LogEntry = namedtuple("LogEntry", ["level", "message"])
 
 _ALL_LEVELS = ["stdout", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
-#: Foreground color per log level, shared by the live console and this viewer.
-#: ``stdout`` is plain white so raw ``print()`` output reads apart from INFO.
-LEVEL_COLORS = {
-    "stdout":   "#FFFFFF",
-    "DEBUG":    "#A0A0A0",
-    "INFO":     "#39FF14",
-    "WARNING":  "#FFD700",
-    "ERROR":    "#FF6B6B",
-    "CRITICAL": "#FF0000",
+#: Log level -> the theme colour token that paints it.
+_LEVEL_TOKENS = {
+    "stdout":   "console.stdout",
+    "DEBUG":    "console.debug",
+    "INFO":     "console.info",
+    "WARNING":  "console.warning",
+    "ERROR":    "console.error",
+    "CRITICAL": "console.critical",
 }
 
-_DEFAULT_COLOR = "#FFFFFF"
+
+def level_colors() -> dict[str, str]:
+    """Return the foreground colour for each log level under the active theme.
+
+    Shared by the live console and this viewer, so a line keeps its colour when
+    it is reopened in the log window.
+
+    Returns:
+        Level name to ``#rrggbb``. ``stdout`` reads apart from INFO on purpose:
+        raw ``print()`` output should not look like a logged message.
+    """
+    colors = active_theme().colors
+    return {level: colors[token] for level, token in _LEVEL_TOKENS.items()}
+
+
+def default_color() -> str:
+    """Return the colour for a level the theme does not name.
+
+    Returns:
+        The ``stdout`` colour, which is the theme's plain console foreground.
+    """
+    return active_theme().colors["console.stdout"]
+
+
+def console_style() -> str:
+    """Return the stylesheet shared by both console views.
+
+    The console is the one area that is meant to read as a terminal, so it gets
+    its own background, its own border and a monospaced face -- all of them
+    from the theme, so a panel-styled theme can inset it rather than leaving a
+    flat rectangle butted against the page.
+
+    Returns:
+        A stylesheet for a read-only text view.
+    """
+    theme = active_theme()
+    colors, shape, font = theme.colors, theme.shape, theme.font
+    return (
+        f"background:{colors['bg.console']};"
+        f"color:{colors['console.stdout']};"
+        f"border:{shape['shape.border_width']:g}px solid {colors['border.console']};"
+        f"border-radius:{shape['shape.radius_control']:g}px;"
+        f"font-family: {', '.join(font.mono_family)};"
+        f"font-size: {font.mono_size_pt:g}pt;"
+    )
 
 
 class LogWindow(QMainWindow):
@@ -99,11 +144,7 @@ class LogWindow(QMainWindow):
         # ── Console ───────────────────────────────────────────────────────────
         self._console = QPlainTextEdit(central)
         self._console.setReadOnly(True)
-        self._console.setStyleSheet(
-            "background:#1e1e1e; color:#ffffff; border-radius:6px;"
-            "font-family: Consolas, 'Microsoft YaHei', Meiryo, monospace;"
-            "font-size: 10pt;"
-        )
+        self._console.setStyleSheet(console_style())
         layout.addWidget(self._console)
 
         # ── Bottom bar ────────────────────────────────────────────────────────
@@ -152,13 +193,15 @@ class LogWindow(QMainWindow):
         self._console.clear()
         cursor = self._console.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
+        colors = level_colors()
+        fallback = default_color()
         for log in self._logs:
             if log.level not in self._active_levels:
                 continue
             if query and query not in log.message.lower():
                 continue
             fmt = QTextCharFormat()
-            fmt.setForeground(QColor(LEVEL_COLORS.get(log.level, _DEFAULT_COLOR)))
+            fmt.setForeground(QColor(colors.get(log.level, fallback)))
             if log.level == "CRITICAL":
                 fmt.setFontWeight(700)
             cursor.insertText(log.message + "\n", fmt)
