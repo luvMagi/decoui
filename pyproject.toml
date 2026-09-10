@@ -1,6 +1,6 @@
 [project]
 name = "decoui"
-version = "0.5.0"
+version = "0.5.1"
 description = "Decorator-driven GUI framework for Python — generate PySide6 UIs from type annotations"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -44,7 +44,7 @@ build-backend = "hatchling.build"
 # back into a published artifact, which is how it reached 0.3.0.
 exclude = [
     ".idea",
-    "docs/icon.psd",
+    "docs/images/icon.psd",
 ]
 
 [tool.hatch.build.targets.wheel]

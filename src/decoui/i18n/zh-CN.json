@@ -7,7 +7,7 @@
   "common.none": "无",
   "common.search": "搜索:",
 
-  "app.window_title": "decoui — {title}",
+  "app.window_title": " {title}",
 
   "topbar.tags": "标签:",
   "topbar.help_tooltip": "帮助 — 如何使用各个工具",
@@ -80,9 +80,22 @@
   "settings.restart_title": "重启后切换语言",
   "settings.restart_body": "decoui 将在下次启动时显示{language}。你更改的其他设置都已生效。",
   "settings.restart_wait": "确定（{seconds}）",
+  "settings.font_family": "字体族:",
+  "settings.dump_i18n": "导出默认 i18n JSON…",
+  "settings.dump_i18n_tooltip": "将此应用声明的所有可翻译字符串及其源文本写入目录文件，作为翻译的起始模板",
+  "settings.dump_help": "导出默认帮助 Markdown…",
+  "settings.dump_help_tooltip": "将各工具的帮助正文写入 Markdown 文件，作为翻译的起始模板。所选文件夹中已有的文件不会被改动。",
+  "settings.dump_help_title": "保存帮助页面",
+  "settings.dump_help_done": "已将 {written} 个文件写入 {path}。已跳过其中现有的 {skipped} 个文件。",
+  "settings.dump_i18n_title": "保存翻译模板",
+  "settings.dump_i18n_done": "已将 {count} 个条目写入 {path}",
+  "settings.dump_i18n_failed": "无法写入模板:\n{error}",
+  "settings.apply_note": "新主题和字体会立即应用。新语言将在重启后生效。",
 
   "help.title": "帮助 — 工具参考",
   "help.search_placeholder": "按工具名或分组名称筛选…",
+  "help.back_tooltip": "返回上一页",
+  "help.forward_tooltip": "前进",
   "help.guide_group": "decoui 使用指南",
   "help.guide_summary": "介绍本应用程序的整体使用方式，而非单个工具的具体功能。",
   "help.tools": "工具",
@@ -108,6 +121,8 @@
   "startup.title": "启动问题",
   "startup.text": "有 {count} 个启动步骤失败。\n应用程序已跳过这些步骤继续运行。",
 
+  "tool_i18n.problem_source": "翻译",
+  "tool_i18n.problem_summary": "无法读取工具翻译文件；将使用未翻译文本",
   "theme.problem_source": "主题",
   "theme.problem_summary": "主题加载失败；已回退到浅色主题"
 }

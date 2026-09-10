@@ -7,7 +7,7 @@
   "common.none": "無",
   "common.search": "搜尋:",
 
-  "app.window_title": "decoui — {title}",
+  "app.window_title": " {title}",
 
   "topbar.tags": "標籤:",
   "topbar.help_tooltip": "說明 — 如何使用各工具",
@@ -80,9 +80,22 @@
   "settings.restart_title": "重新啟動後切換語言",
   "settings.restart_body": "decoui 將在下次啟動時顯示{language}。你變更的其他設定都已套用。",
   "settings.restart_wait": "確定（{seconds}）",
+  "settings.font_family": "字型系列:",
+  "settings.dump_i18n": "匯出預設 i18n JSON…",
+  "settings.dump_i18n_tooltip": "將此應用程式宣告的所有可翻譯字串及其來源文字寫入目錄檔案，作為翻譯的起始範本",
+  "settings.dump_help": "匯出預設說明 Markdown…",
+  "settings.dump_help_tooltip": "將各工具的說明本文寫入 Markdown 檔案，作為翻譯的起始範本。所選資料夾中已有的檔案不會變更。",
+  "settings.dump_help_title": "儲存說明頁面",
+  "settings.dump_help_done": "已將 {written} 個檔案寫入 {path}。已略過其中現有的 {skipped} 個檔案。",
+  "settings.dump_i18n_title": "儲存翻譯範本",
+  "settings.dump_i18n_done": "已將 {count} 個項目寫入 {path}",
+  "settings.dump_i18n_failed": "無法寫入範本:\n{error}",
+  "settings.apply_note": "新佈景主題和字型會立即套用。新語言將在重新啟動後生效。",
 
   "help.title": "說明 — 工具參考",
   "help.search_placeholder": "依工具名稱或分組名稱篩選…",
+  "help.back_tooltip": "返回上一頁",
+  "help.forward_tooltip": "前進",
   "help.guide_group": "decoui 使用手冊",
   "help.guide_summary": "介紹本應用程式的整體使用方式，而非單一工具的具體功能。",
   "help.tools": "工具",
@@ -108,6 +121,8 @@
   "startup.title": "啟動問題",
   "startup.text": "有 {count} 個啟動步驟失敗。\n應用程式已略過這些步驟繼續執行。",
 
+  "tool_i18n.problem_source": "翻譯",
+  "tool_i18n.problem_summary": "無法讀取工具翻譯檔案；將使用未翻譯文字",
   "theme.problem_source": "佈景主題",
   "theme.problem_summary": "佈景主題載入失敗；已回退至淺色主題"
 }

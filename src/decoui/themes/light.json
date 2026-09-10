@@ -102,9 +102,11 @@
     "size_pt": 10,
     "letter_spacing": 0,
     "mono_family": [
+      "Cascadia Mono",
+      "M PLUS 1 Code",
+      "Noto Sans Mono",
       "Consolas",
-      "Microsoft YaHei",
-      "Meiryo",
+      "DejaVu Sans Mono",
       "monospace"
     ],
     "mono_size_pt": 10,

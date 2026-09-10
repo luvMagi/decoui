@@ -7,7 +7,7 @@
   "common.none": "Keine",
   "common.search": "Suchen:",
 
-  "app.window_title": "decoui — {title}",
+  "app.window_title": " {title}",
 
   "topbar.tags": "Tags:",
   "topbar.help_tooltip": "Hilfe — Verwendung der einzelnen Werkzeuge",
@@ -80,9 +80,22 @@
   "settings.restart_title": "Neustart erforderlich, um die Sprache zu ändern",
   "settings.restart_body": "decoui zeigt beim nächsten Start {language}. Alle anderen Änderungen sind bereits angewendet.",
   "settings.restart_wait": "OK ({seconds})",
+  "settings.font_family": "Schriftfamilie:",
+  "settings.dump_i18n": "Standard-i18n-JSON exportieren…",
+  "settings.dump_i18n_tooltip": "Alle von dieser Anwendung deklarierten übersetzbaren Texte mit dem Text aus ihrer jeweiligen Quelle als Ausgangskatalog für eine Übersetzung speichern",
+  "settings.dump_help": "Standard-Hilfe als Markdown exportieren…",
+  "settings.dump_help_tooltip": "Die Hilfetexte jedes Werkzeugs als Markdown-Datei speichern, um darauf eine Übersetzung aufzubauen. Bereits im ausgewählten Ordner vorhandene Dateien bleiben unverändert.",
+  "settings.dump_help_title": "Hilfeseiten speichern",
+  "settings.dump_help_done": "Es wurden {written} Datei(en) unter {path} gespeichert. {skipped} bereits vorhandene Datei(en) wurden übersprungen.",
+  "settings.dump_i18n_title": "Übersetzungsvorlage speichern",
+  "settings.dump_i18n_done": "Es wurden {count} Einträge unter {path} gespeichert",
+  "settings.dump_i18n_failed": "Die Vorlage konnte nicht gespeichert werden:\n{error}",
+  "settings.apply_note": "Ein neues Design und eine neue Schrift werden sofort angewendet. Eine neue Sprache wird nach einem Neustart wirksam.",
 
   "help.title": "Hilfe — Werkzeug-Referenz",
   "help.search_placeholder": "Nach Werkzeug- oder Gruppennamen filtern…",
+  "help.back_tooltip": "Zurück zur vorherigen Seite",
+  "help.forward_tooltip": "Vorwärts",
   "help.guide_group": "decoui-Handbuch",
   "help.guide_summary": "Funktionsweise der gesamten Anwendung im Unterschied zu den einzelnen Werkzeugen.",
   "help.tools": "Werkzeuge",
@@ -108,6 +121,8 @@
   "startup.title": "Probleme beim Start",
   "startup.text": "{count} Startschritt(e) fehlgeschlagen.\nDie Anwendung wird ohne diese ausgeführt.",
 
+  "tool_i18n.problem_source": "Übersetzungen",
+  "tool_i18n.problem_summary": "Eine Übersetzungsdatei für ein Werkzeug konnte nicht gelesen werden; der nicht übersetzte Text wird verwendet",
   "theme.problem_source": "Designs",
   "theme.problem_summary": "Design konnte nicht geladen werden; Fallback auf das helle Design"
 }

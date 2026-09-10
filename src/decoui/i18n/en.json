@@ -7,7 +7,7 @@
   "common.none": "None",
   "common.search": "Search:",
 
-  "app.window_title": "decoui — {title}",
+  "app.window_title": " {title}",
 
   "topbar.tags": "Tags:",
   "topbar.help_tooltip": "Help — how to use each tool",

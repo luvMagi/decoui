@@ -1,5 +1,7 @@
 # Writing help
 
+> [Project README](../README.md) · [Complete reference](reference.md)
+
 A decoui application's Help window is built from three sources, all written in
 one markup dialect:
 

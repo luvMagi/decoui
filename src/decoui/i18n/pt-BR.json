@@ -7,7 +7,7 @@
   "common.none": "Nenhum",
   "common.search": "Pesquisar:",
 
-  "app.window_title": "decoui — {title}",
+  "app.window_title": " {title}",
 
   "topbar.tags": "Tags:",
   "topbar.help_tooltip": "Ajuda — como usar cada ferramenta",
@@ -80,9 +80,22 @@
   "settings.restart_title": "Reinicie para mudar o idioma",
   "settings.restart_body": "O decoui exibirá {language} na próxima vez que iniciar. As outras alterações já foram aplicadas.",
   "settings.restart_wait": "OK ({seconds})",
+  "settings.font_family": "Família de fontes:",
+  "settings.dump_i18n": "Exportar JSON i18n padrão…",
+  "settings.dump_i18n_tooltip": "Gravar todas as strings traduzíveis declaradas por esta aplicação, com o texto de sua própria fonte, como um catálogo inicial para uma tradução",
+  "settings.dump_help": "Exportar ajuda padrão em Markdown…",
+  "settings.dump_help_tooltip": "Gravar o texto de ajuda de cada ferramenta como um arquivo Markdown para iniciar uma tradução. Os arquivos que já existem na pasta escolhida não são alterados.",
+  "settings.dump_help_title": "Salvar páginas de ajuda",
+  "settings.dump_help_done": "Foram gravados {written} arquivo(s) em {path}. Foram ignorados {skipped} que já existiam.",
+  "settings.dump_i18n_title": "Salvar modelo de tradução",
+  "settings.dump_i18n_done": "Foram gravadas {count} entradas em {path}",
+  "settings.dump_i18n_failed": "Não foi possível gravar o modelo:\n{error}",
+  "settings.apply_note": "O novo tema e a nova fonte são aplicados imediatamente. O novo idioma entra em vigor após reiniciar.",
 
   "help.title": "Ajuda — Referência de ferramentas",
   "help.search_placeholder": "Filtrar por nome de ferramenta ou grupo…",
+  "help.back_tooltip": "Voltar para a página anterior",
+  "help.forward_tooltip": "Avançar",
   "help.guide_group": "Como usar o decoui",
   "help.guide_summary": "Como esta aplicação funciona, em contraste com o que cada ferramenta individual faz.",
   "help.tools": "Ferramentas",
@@ -108,6 +121,8 @@
   "startup.title": "Problemas na inicialização",
   "startup.text": "{count} etapa(s) de inicialização falharam.\nA aplicação está sendo executada sem elas.",
 
+  "tool_i18n.problem_source": "Traduções",
+  "tool_i18n.problem_summary": "Não foi possível ler um arquivo de tradução de uma ferramenta; o texto não traduzido será usado",
   "theme.problem_source": "Temas",
   "theme.problem_summary": "Falha ao carregar o tema; revertendo para o tema claro"
 }

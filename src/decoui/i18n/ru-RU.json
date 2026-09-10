@@ -7,7 +7,7 @@
   "common.none": "Нет",
   "common.search": "Поиск:",
 
-  "app.window_title": "decoui — {title}",
+  "app.window_title": " {title}",
 
   "topbar.tags": "Теги:",
   "topbar.help_tooltip": "Справка — руководство по инструментам",
@@ -80,9 +80,22 @@
   "settings.restart_title": "Перезапустите, чтобы сменить язык",
   "settings.restart_body": "decoui отобразит {language} при следующем запуске. Остальные изменения уже применены.",
   "settings.restart_wait": "ОК ({seconds})",
+  "settings.font_family": "Семейство шрифтов:",
+  "settings.dump_i18n": "Экспорт стандартного JSON-файла i18n…",
+  "settings.dump_i18n_tooltip": "Записать все допускающие перевод строки, объявленные этим приложением, вместе с исходным текстом в каталог, который можно использовать как основу для перевода",
+  "settings.dump_help": "Экспорт стандартной справки в Markdown…",
+  "settings.dump_help_tooltip": "Записать справочный текст каждого инструмента в файл Markdown, который можно использовать как основу для перевода. Уже существующие в выбранной папке файлы останутся без изменений.",
+  "settings.dump_help_title": "Сохранить страницы справки",
+  "settings.dump_help_done": "Файлов записано в {path}: {written}. Уже существовавших файлов пропущено: {skipped}.",
+  "settings.dump_i18n_title": "Сохранить шаблон перевода",
+  "settings.dump_i18n_done": "Записано элементов в {path}: {count}",
+  "settings.dump_i18n_failed": "Не удалось записать шаблон:\n{error}",
+  "settings.apply_note": "Новая тема и новый шрифт применяются сразу. Новый язык вступает в силу после перезапуска.",
 
   "help.title": "Справка — Справочник по инструментам",
   "help.search_placeholder": "Фильтр по названию инструмента или группы…",
+  "help.back_tooltip": "Назад к предыдущей странице",
+  "help.forward_tooltip": "Вперёд",
   "help.guide_group": "Руководство decoui",
   "help.guide_summary": "Общие принципы работы приложения в отличие от описания конкретных инструментов.",
   "help.tools": "Инструменты",
@@ -108,6 +121,8 @@
   "startup.title": "Проблемы при запуске",
   "startup.text": "Не удалось выполнить шагов запуска: {count}.\nПриложение работает без них.",
 
+  "tool_i18n.problem_source": "Переводы",
+  "tool_i18n.problem_summary": "Не удалось прочитать файл перевода инструмента; используется непереведённый текст",
   "theme.problem_source": "Темы",
   "theme.problem_summary": "Не удалось загрузить тему; применен переход на светлую тему"
 }

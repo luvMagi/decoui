@@ -1,5 +1,7 @@
 # Publishing to PyPI
 
+> [Project README](../README.md) · [Complete reference](reference.md)
+
 ## Steps
 
 ### 1. Bump the version

@@ -7,7 +7,7 @@
   "common.none": "なし",
   "common.search": "検索:",
 
-  "app.window_title": "decoui — {title}",
+  "app.window_title": " {title}",
 
   "topbar.tags": "タグ:",
   "topbar.help_tooltip": "ヘルプ — 各ツールの使い方",
@@ -80,9 +80,22 @@
   "settings.restart_title": "言語の変更には再起動が必要です",
   "settings.restart_body": "decoui は次回の起動時に{language}で表示されます。他に変更した設定はすでに適用されています。",
   "settings.restart_wait": "OK（{seconds}）",
+  "settings.font_family": "フォントファミリー:",
+  "settings.dump_i18n": "既定の i18n JSON を出力…",
+  "settings.dump_i18n_tooltip": "このアプリケーションが宣言する翻訳可能なすべての文字列を、ソースのテキスト付きで翻訳開始用のカタログとして書き出します",
+  "settings.dump_help": "既定のヘルプ Markdown を出力…",
+  "settings.dump_help_tooltip": "各ツールのヘルプ本文を、翻訳開始用の Markdown ファイルとして書き出します。選択したフォルダーに既にあるファイルは変更しません。",
+  "settings.dump_help_title": "ヘルプページを保存",
+  "settings.dump_help_done": "{path} に {written} 件のファイルを書き込みました。既に存在する {skipped} 件はスキップしました。",
+  "settings.dump_i18n_title": "翻訳テンプレートを保存",
+  "settings.dump_i18n_done": "{path} に {count} 件のエントリを書き込みました",
+  "settings.dump_i18n_failed": "テンプレートを書き込めませんでした:\n{error}",
+  "settings.apply_note": "新しいテーマとフォントはすぐに適用されます。新しい言語は再起動後に反映されます。",
 
   "help.title": "ヘルプ — ツールリファレンス",
   "help.search_placeholder": "ツール名またはグループ名で絞り込み…",
+  "help.back_tooltip": "前のページに戻る",
+  "help.forward_tooltip": "次のページへ進む",
   "help.guide_group": "decoui の使い方",
   "help.guide_summary": "個々のツールではなく、このアプリケーション全体の使い方について説明します。",
   "help.tools": "ツール",
@@ -108,6 +121,8 @@
   "startup.title": "起動時の問題",
   "startup.text": "{count} 件の起動処理に失敗しました。\nそれらを除いてアプリケーションを実行しています。",
 
+  "tool_i18n.problem_source": "翻訳",
+  "tool_i18n.problem_summary": "ツールの翻訳ファイルを読み込めなかったため、未翻訳のテキストを使用します",
   "theme.problem_source": "テーマ",
   "theme.problem_summary": "テーマの読み込みに失敗したため、ライトテーマを使用しています"
 }

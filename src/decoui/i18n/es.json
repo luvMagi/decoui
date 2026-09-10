@@ -7,7 +7,7 @@
   "common.none": "Ninguno",
   "common.search": "Buscar:",
 
-  "app.window_title": "decoui — {title}",
+  "app.window_title": " {title}",
 
   "topbar.tags": "Etiquetas:",
   "topbar.help_tooltip": "Ayuda — cómo usar cada herramienta",
@@ -80,9 +80,22 @@
   "settings.restart_title": "Reinicia para cambiar el idioma",
   "settings.restart_body": "decoui mostrará {language} la próxima vez que se inicie. Los demás cambios ya se han aplicado.",
   "settings.restart_wait": "Aceptar ({seconds})",
+  "settings.font_family": "Familia tipográfica:",
+  "settings.dump_i18n": "Exportar JSON i18n predeterminado…",
+  "settings.dump_i18n_tooltip": "Escribir todas las cadenas traducibles que declara esta aplicación, con el texto de su propia fuente, como un catálogo inicial para una traducción",
+  "settings.dump_help": "Exportar ayuda predeterminada en Markdown…",
+  "settings.dump_help_tooltip": "Escribir el texto de ayuda de cada herramienta como un archivo Markdown para iniciar una traducción. Los archivos que ya existan en la carpeta elegida no se modifican.",
+  "settings.dump_help_title": "Guardar páginas de ayuda",
+  "settings.dump_help_done": "Se escribieron {written} archivo(s) en {path}. Se omitieron {skipped} porque ya existían.",
+  "settings.dump_i18n_title": "Guardar plantilla de traducción",
+  "settings.dump_i18n_done": "Se escribieron {count} entradas en {path}",
+  "settings.dump_i18n_failed": "No se pudo escribir la plantilla:\n{error}",
+  "settings.apply_note": "El tema y la fuente nuevos se aplican de inmediato. El nuevo idioma se aplica después de reiniciar.",
 
   "help.title": "Ayuda — Referencia de herramientas",
   "help.search_placeholder": "Filtrar por nombre de herramienta o grupo…",
+  "help.back_tooltip": "Volver a la página anterior",
+  "help.forward_tooltip": "Avanzar",
   "help.guide_group": "Cómo usar decoui",
   "help.guide_summary": "Cómo funciona esta aplicación en general, a diferencia de lo que hace cada herramienta individual.",
   "help.tools": "Herramientas",
@@ -108,6 +121,8 @@
   "startup.title": "Problemas al iniciar",
   "startup.text": "Fallaron {count} paso(s) de inicio.\nLa aplicación se está ejecutando sin ellos.",
 
+  "tool_i18n.problem_source": "Traducciones",
+  "tool_i18n.problem_summary": "No se pudo leer un archivo de traducción de una herramienta; se utiliza el texto sin traducir",
   "theme.problem_source": "Temas",
   "theme.problem_summary": "Error al cargar el tema; restableciendo al tema claro"
 }

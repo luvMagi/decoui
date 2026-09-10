@@ -1,5 +1,7 @@
 # Cancelling a run
 
+> [Project README](../README.md) · [Complete reference](reference.md)
+
 Stop is the hardest promise decoui makes, because Python cannot keep it on its
 own. This is what actually happens when the button is pressed, and what a tool
 has to do to be stoppable.

@@ -1,5 +1,7 @@
 # Startup Lifecycle — Where to Load Data
 
+> [Project README](../README.md) · [Complete reference](reference.md)
+
 > Guide for tool authors · Applies to decoui `0.2.0`+ · theme step added in `0.4.0` · language step added in `0.5.0`
 
 Reading initial values from a config file, a database, or a service is the common case, not an edge case. decoui gives you three places to do it and they are **not** interchangeable. This page says which one to use and what each guarantees.

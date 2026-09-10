@@ -1,5 +1,7 @@
 # Translating an application
 
+> [Project README](../README.md) · [Complete reference](reference.md)
+
 decoui translates **its own** interface — Run, Stop, the history columns — from
 catalogues it ships. It cannot translate yours: the labels, descriptions and
 field text you write into `@toolset` and `@tool` are strings it has never seen.

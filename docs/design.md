@@ -1,13 +1,15 @@
 # decoui — Design & Implementation Reference
 
 > Decorator-Driven GUI Framework for Python · `pip install decoui`
+>
+> [Project README](../README.md) · [Complete reference](reference.md)
 
 **Related documents**
 
 | Document | Covers |
 |---|---|
 | [startup-lifecycle.md](startup-lifecycle.md) | Where to load persisted data: signature defaults vs. the two `on_startup` hooks vs. `@tool(defaults=...)`. Read before loading anything at startup. |
-| [v0.2.0/design.md](v0.2.0/design.md) | Form assist — autocomplete, cascading fill, lazy defaults, and the startup sequence that supports them. |
+| [reference.md#form-assist](reference.md#form-assist) | Form assist — autocomplete, cascading fill, and lazy defaults. |
 
 ---
 
