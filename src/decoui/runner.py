@@ -24,8 +24,18 @@ from collections.abc import Sequence
 from typing import Callable
 
 from .decorators import _TOOL_ATTR, _TOOLSET_ATTR
+from .theme import (
+    DEFAULT_THEME_ID,
+    THEME_SETTING,
+    Theme,
+    discover_themes,
+    render_stylesheet,
+    resolve_theme,
+    set_active_theme,
+    set_active_theme_dir,
+)
 from .registry import build_tree
-from .storage.db import init_db, set_db_path
+from .storage.db import get_setting, init_db, set_db_path
 
 
 def gui_main(
@@ -33,6 +43,8 @@ def gui_main(
     db_path: str | Path | None = None,
     on_startup: Callable[[], None] | None = None,
     toolsets: Sequence[type] | None = None,
+    theme: str | None = None,
+    theme_dir: str | Path | None = None,
 ) -> None:
     """Launch the decoui GUI application.
 
@@ -42,15 +54,17 @@ def gui_main(
     Startup runs in a fixed order, so anything loaded early is available later:
 
       1. ``db_path`` is applied and the database is initialised
-      2. the toolset tree is built and validated
-      3. ``on_startup()`` runs                     <- application hook
-      4. every toolset class is instantiated       <- ``self`` exists from here
-      5. each instance's own ``on_startup()`` method runs, if it defines one
-      6. the window is shown and the event loop starts
+      2. the theme is resolved and applied          <- before any widget exists
+      3. the toolset tree is built and validated
+      4. ``on_startup()`` runs                     <- application hook
+      5. every toolset class is instantiated       <- ``self`` exists from here
+      6. each instance's own ``on_startup()`` method runs, if it defines one
+      7. the window is shown and the event loop starts
 
-    Failures in steps 3-5 do not stop the application: they are collected and
-    reported in one dialog over the main window, and everything that did load
-    stays usable.
+    Failures in steps 2 and 4-6 do not stop the application: they are collected
+    and reported in one dialog over the main window, and everything that did
+    load stays usable. An unusable theme in particular is never fatal -- the
+    application falls back to the built-in light theme and says so.
 
     Both hooks run on the GUI thread before the event loop starts. See
     docs/startup-lifecycle.md for what that rules out.
@@ -72,6 +86,13 @@ def gui_main(
             The list order does not reach the navigation tree: build_tree()
             sorts toolsets and tools by label. Pass an explicit list to
             control *what* loads, not what order it appears in.
+        theme: Id of the theme to start under. This is the application's
+            *default*, not a lock: a theme the user picked in Settings wins
+            over it, the same way db_path names a location while the data in it
+            is the user's. Defaults to the built-in light theme.
+        theme_dir: Directory scanned for user-supplied ``*.json`` themes.
+            Defaults to ``~/.decoui/themes``. A missing directory is fine and
+            is not created.
 
     Raises:
         RuntimeError: If no @toolset class is visible in the calling namespace,
@@ -104,16 +125,19 @@ def gui_main(
 
     app = QApplication.instance() or QApplication(sys.argv)
     app.setWindowIcon(QIcon(str(_icon_path())))
-    _apply_fonts(app)
-    _apply_theme(app)
 
+    # The database comes first: the user's theme choice lives in it. The theme
+    # is then applied before anything is built, because decoui never re-themes
+    # a running window -- widgets read their colours as they are constructed.
     init_db()
+    problems = _apply_startup_theme(app, theme, theme_dir)
+
     tree = build_tree(*toolset_classes)
 
     # Startup hooks run here, before show(): whatever they cost is time the
     # user spends looking at nothing. Nothing below starts the event loop, so
     # neither hook may wait on a timer or a worker thread.
-    problems = _run_startup_hook(on_startup)
+    problems += _run_startup_hook(on_startup)
     instances, init_problems = _create_instances(tree)
     problems += init_problems
     problems += _run_toolset_hooks(instances)
@@ -159,6 +183,54 @@ def _check_explicit_toolsets(toolsets: Sequence[type]) -> list[type]:
                 f"with @toolset"
             )
     return toolset_classes
+
+
+def _apply_startup_theme(
+    app, theme: str | None, theme_dir: str | Path | None
+) -> list[StartupProblem]:
+    """Resolve and apply the theme, collecting whatever went wrong.
+
+    Args:
+        app: The QApplication to style.
+        theme: The application's default theme id, or None.
+        theme_dir: Directory of user themes, or None for the default.
+
+    Returns:
+        Problems to report once the window is up. Never raises: a theme is
+        presentation, and refusing to start over one would be out of all
+        proportion to what it costs the user.
+
+    Note:
+        The stored choice outranks the ``theme`` argument. If it names
+        something unavailable, the fallback is the built-in light theme rather
+        than the argument -- the setting is treated as temporarily unresolvable,
+        not as wrong.
+    """
+    set_active_theme_dir(theme_dir)
+    try:
+        themes, discovery_problems = discover_themes(theme_dir)
+        requested = get_setting(THEME_SETTING) or theme
+        active, resolve_problems = resolve_theme(themes, requested)
+    except Exception:
+        # Nothing above is supposed to raise: one unusable file becomes one
+        # ThemeProblem inside discover_themes, so the rest of the directory
+        # still loads. This path exists only so that a defect in theme loading
+        # can never be what stops an application from opening -- reaching it
+        # costs the user every theme they wrote, so it is a bug, not a policy.
+        from .theme import builtin_themes as _builtin
+        active = _builtin()[DEFAULT_THEME_ID]
+        _apply_theme(app, active)
+        return [StartupProblem(
+            source="Themes",
+            summary="theme loading failed; falling back to the light theme",
+            detail=traceback.format_exc(),
+        )]
+
+    _apply_theme(app, active)
+    return [
+        StartupProblem(source=p.source, summary=p.summary, detail=p.detail)
+        for p in (*discovery_problems, *resolve_problems)
+    ]
 
 
 @dataclass(frozen=True)
@@ -314,281 +386,43 @@ def _callable_name(target: Callable) -> str:
     return getattr(target, "__qualname__", None) or repr(target)
 
 
-_APP_STYLESHEET = """
-QWidget {
-    background-color: #f5f6fa;
-    color: #1e2128;
-}
-QMainWindow > QWidget,
-QStackedWidget > QWidget {
-    background-color: #ffffff;
-}
-/* Sidebar */
-QWidget#sidebar {
-    background-color: #f8faff;
-    border-right: 1px solid #e4e7ef;
-}
-QWidget#sidebar QLineEdit {
-    background-color: #ffffff;
-}
-/* Tree */
-QTreeWidget {
-    background-color: #f8faff;
-    border: none;
-    outline: none;
-    padding: 2px;
-}
-QTreeWidget::item {
-    padding: 4px 6px;
-    border-radius: 5px;
-}
-QTreeWidget::item:hover {
-    background-color: #edf0fb;
-}
-QTreeWidget::item:selected {
-    background-color: #dbe4ff;
-    color: #1e2128;
-}
-/* Splitter */
-QSplitter::handle:horizontal {
-    background-color: #e4e7ef;
-    width: 1px;
-}
-/* Tabs */
-QTabWidget::pane {
-    border: none;
-    border-top: 1px solid #e4e7ef;
-    background-color: #ffffff;
-}
-QTabBar::tab {
-    background-color: #eef1f7;
-    border: 1px solid #d9deea;
-    border-bottom: none;
-    border-top-left-radius: 6px;
-    border-top-right-radius: 6px;
-    padding: 7px 12px;
-    margin-right: 2px;
-}
-QTabBar::tab:selected {
-    background-color: #ffffff;
-    color: #3b5bdb;
-}
-/* Close affordance installed by MainWindow; Qt's built-in one is unusable here
-   because styling QTabBar::tab stops it being painted on the selected tab and
-   its position cannot be nudged in from the tab edge. */
-QToolButton#tabCloseButton {
-    background-color: transparent;
-    border: none;
-    border-radius: 3px;
-}
-QToolButton#tabCloseButton:hover {
-    background-color: #e4e7ef;
-}
-QToolButton#tabCloseButton:pressed {
-    background-color: #d0d5e0;
-}
-/* Buttons */
-QPushButton {
-    background-color: #ffffff;
-    border: 1px solid #d0d5e0;
-    border-radius: 6px;
-    padding: 4px 14px;
-    color: #344054;
-    min-height: 26px;
-}
-QPushButton:hover {
-    background-color: #f0f4ff;
-    border-color: #7c90cc;
-}
-QPushButton:pressed {
-    background-color: #e0e8ff;
-}
-QPushButton:checked {
-    background-color: #3b5bdb;
-    color: #ffffff;
-    border-color: #3b5bdb;
-}
-QPushButton:disabled {
-    color: #aab0bf;
-    border-color: #e4e7ef;
-    background-color: #f8f9fc;
-}
-QPushButton#run_btn {
-    background-color: #2b9348;
-    color: #ffffff;
-    border-color: #2b9348;
-    font-weight: bold;
-}
-QPushButton#run_btn:hover {
-    background-color: #218838;
-    border-color: #218838;
-}
-QPushButton#stop_btn {
-    background-color: #dc3545;
-    color: #ffffff;
-    border-color: #dc3545;
-}
-QPushButton#stop_btn:hover {
-    background-color: #c82333;
-    border-color: #c82333;
-}
-/* Inputs */
-QLineEdit {
-    background-color: #ffffff;
-    border: 1px solid #d0d5e0;
-    border-radius: 6px;
-    padding: 4px 8px;
-    min-height: 24px;
-}
-QLineEdit:focus {
-    border-color: #3b5bdb;
-}
-QTextEdit {
-    background-color: #ffffff;
-    border: 1px solid #d0d5e0;
-    border-radius: 6px;
-    padding: 4px 8px;
-}
-QTextEdit:focus {
-    border-color: #3b5bdb;
-}
-QSpinBox, QDoubleSpinBox {
-    background-color: #ffffff;
-    border: 1px solid #d0d5e0;
-    border-radius: 6px;
-    padding: 3px 8px 3px 8px;
-    min-height: 26px;
-}
-QSpinBox:focus, QDoubleSpinBox:focus {
-    border-color: #3b5bdb;
-}
-QSpinBox::up-button, QDoubleSpinBox::up-button,
-QSpinBox::down-button, QDoubleSpinBox::down-button {
-    width: 0;
-    border: none;
-    background: none;
-}
-QComboBox {
-    background-color: #ffffff;
-    border: 1px solid #d0d5e0;
-    border-radius: 6px;
-    padding: 3px 8px;
-    min-height: 26px;
-}
-QComboBox:focus {
-    border-color: #3b5bdb;
-}
-QComboBox::drop-down {
-    border: none;
-    width: 24px;
-}
-QComboBox QAbstractItemView {
-    background-color: #ffffff;
-    border: 1px solid #d0d5e0;
-    selection-background-color: #dbe4ff;
-    selection-color: #1e2128;
-    outline: none;
-}
-QCheckBox {
-    spacing: 6px;
-    background: transparent;
-}
-QCheckBox::indicator {
-    width: 16px;
-    height: 16px;
-    border: 1.5px solid #d0d5e0;
-    border-radius: 4px;
-    background: #ffffff;
-}
-QCheckBox::indicator:checked {
-    background-color: #3b5bdb;
-    border-color: #3b5bdb;
-}
-/* Progress */
-QProgressBar {
-    border: none;
-    border-radius: 2px;
-    background-color: #e4e7ef;
-}
-QProgressBar::chunk {
-    background-color: #3b5bdb;
-    border-radius: 2px;
-}
-/* Table */
-QTableWidget {
-    background-color: #ffffff;
-    border: 1px solid #e4e7ef;
-    border-radius: 8px;
-    gridline-color: #f0f2f8;
-    outline: none;
-}
-QHeaderView::section {
-    background-color: #f8f9fc;
-    border: none;
-    border-bottom: 1px solid #e4e7ef;
-    padding: 6px 8px;
-    font-weight: bold;
-    color: #667085;
-}
-QTableWidget::item {
-    padding: 4px 8px;
-}
-QTableWidget::item:selected {
-    background-color: #dbe4ff;
-    color: #1e2128;
-}
-/* Scrollbars */
-QScrollBar:vertical {
-    background: transparent;
-    width: 8px;
-    margin: 0;
-}
-QScrollBar::handle:vertical {
-    background: #c0c8d8;
-    border-radius: 4px;
-    min-height: 24px;
-}
-QScrollBar::handle:vertical:hover {
-    background: #8a96b0;
-}
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-QScrollBar:horizontal {
-    background: transparent;
-    height: 8px;
-    margin: 0;
-}
-QScrollBar::handle:horizontal {
-    background: #c0c8d8;
-    border-radius: 4px;
-    min-width: 24px;
-}
-QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
-"""
+# The application stylesheet now lives in decoui.theme, rendered from the
+# active theme's tokens. See theme.render_stylesheet().
 
 
-def _apply_fonts(app) -> None:
-    """Set the application font to the first available CJK-capable UI face.
+
+def _apply_fonts(app, theme: Theme) -> None:
+    """Set the application font from the theme.
 
     The families are tried in order and Qt falls back through them, so the same
-    stylesheet renders on Windows, macOS and Linux without per-platform code.
+    theme renders on Windows, macOS and Linux without per-platform code.
 
     Args:
         app: The QApplication to configure.
+        theme: The theme supplying the font.
     """
     from PySide6.QtGui import QFont
     ui_font = QFont()
-    ui_font.setFamilies(["Microsoft YaHei", "Meiryo", "Segoe UI", "sans-serif"])
-    ui_font.setPointSize(10)
+    ui_font.setFamilies(list(theme.font.family))
+    ui_font.setPointSize(theme.font.size_pt)
     app.setFont(ui_font)
 
 
-def _apply_theme(app) -> None:
-    """Install the light stylesheet shared by every decoui window.
+def _apply_theme(app, theme: Theme) -> None:
+    """Install a theme: its stylesheet, its font, and the record of what is live.
+
+    Called once, before any widget exists. decoui does not re-theme a running
+    application -- widgets that style themselves in code read the theme at
+    construction time, so a swap would leave them stale. Changing theme means
+    restarting.
 
     Args:
         app: The QApplication to configure.
+        theme: The theme to apply.
     """
-    app.setStyleSheet(_APP_STYLESHEET)
+    set_active_theme(theme)
+    _apply_fonts(app, theme)
+    app.setStyleSheet(render_stylesheet(theme))
 
 
 def _icon_path() -> Path:
