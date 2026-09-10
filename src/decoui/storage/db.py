@@ -1,4 +1,22 @@
-"""SQLite persistence for decoui execution history and application settings."""
+"""SQLite persistence for decoui execution history and application settings.
+
+One database file holds every run of every tool plus a small key/value settings
+table. It defaults to ``~/.decoui/history.db`` and is overridden per application
+with ``gui_main(db_path=...)``.
+
+Notes that matter when reasoning about the data:
+
+* **Every connection is short-lived.** Each call opens, commits or rolls back,
+  and closes. There is no shared connection and no pooling, so these functions
+  are safe to call from any thread -- which is why the engine can flush log
+  batches while the GUI queries history.
+* **WAL mode is on**, so the real footprint is the ``.db`` plus its ``-wal`` and
+  ``-shm`` sidecars. :func:`get_db_size` counts all three.
+* **Foreign keys are enforced per connection**, so deleting a record cascades to
+  its params and logs.
+* Timestamps are stored as ISO-8601 strings, which sort correctly as text -- the
+  history query orders on them directly.
+"""
 from __future__ import annotations
 
 import sqlite3
@@ -12,17 +30,40 @@ _DB_PATH: Path = Path.home() / ".decoui" / "history.db"
 
 
 def set_db_path(path: Path) -> None:
+    """Point every later connection at a different database file.
+
+    Process-global, and must be called before anything opens the database --
+    :func:`decoui.runner.gui_main` does it first thing when given ``db_path``.
+    Tests use it to redirect history into a temporary directory.
+
+    Args:
+        path: Target database file. Its parent directory is created on demand.
+    """
     global _DB_PATH
     _DB_PATH = path
 
 
 def _get_db_path() -> Path:
+    """Return the database path, creating its parent directory if needed.
+
+    Returns:
+        The configured database file path.
+    """
     _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     return _DB_PATH
 
 
 @contextmanager
 def _conn():
+    """Open a connection that commits on success and rolls back on failure.
+
+    Yields:
+        A sqlite3.Connection with WAL journaling and foreign keys enabled.
+
+    Note:
+        The connection is closed on the way out, so nothing may hold on to it or
+        to a cursor past the ``with`` block.
+    """
     db = _get_db_path()
     con = sqlite3.connect(str(db))
     con.execute("PRAGMA journal_mode=WAL")
@@ -77,6 +118,15 @@ CREATE INDEX IF NOT EXISTS idx_log_record ON execution_log(record_id, seq);
 
 
 def init_db() -> None:
+    """Create the schema if it is missing.
+
+    Idempotent -- every statement is ``CREATE ... IF NOT EXISTS`` -- and called
+    on every application start and by every ExecutionEngine.
+
+    Note:
+        There is no migration mechanism. Adding a column to a table here will
+        not alter an existing database file.
+    """
     with _conn() as con:
         con.executescript(_SCHEMA)
 
@@ -120,6 +170,17 @@ def set_setting(key: str, value: str) -> None:
 
 
 def insert_record(rec: ExecutionRecord) -> int:
+    """Insert a run and its parameter snapshot, returning the new id.
+
+    Called before the tool starts, with ``status='running'``.
+
+    Args:
+        rec: The record to store. Its ``id`` is ignored; ``params`` are written
+            with the id assigned here.
+
+    Returns:
+        The new record id.
+    """
     with _conn() as con:
         cur = con.execute(
             "INSERT INTO execution_record (tool_id, tool_label, started_at, status) VALUES (?,?,?,?)",
@@ -141,6 +202,16 @@ def update_record(
     result_json: str | None = None,
     error_msg: str | None = None,
 ) -> None:
+    """Finalise a run once it has ended.
+
+    Args:
+        rec_id: The record to update.
+        status: ``'success'``, ``'error'`` or ``'cancelled'``.
+        finished_at: End timestamp.
+        result_json: Serialised return value, or None.
+        error_msg: Accepted but never supplied by the engine today; failures
+            are recorded as ERROR log lines instead.
+    """
     with _conn() as con:
         con.execute(
             "UPDATE execution_record SET status=?, finished_at=?, result_json=?, error_msg=? WHERE id=?",
@@ -149,6 +220,11 @@ def update_record(
 
 
 def insert_logs(logs: list[ExecutionLog]) -> None:
+    """Append a batch of console lines in one statement.
+
+    Args:
+        logs: Lines to store. Each carries its own ``record_id`` and ``seq``.
+    """
     if not logs:
         return
     with _conn() as con:
@@ -164,6 +240,18 @@ def query_records(
     since: datetime | None = None,
     limit: int = 500,
 ) -> list[ExecutionRecord]:
+    """Query runs, newest first.
+
+    Args:
+        tool_id: Restrict to one tool, as ``'ClassName.method_name'``.
+        status: Restrict to one status.
+        since: Only runs started at or after this moment.
+        limit: Maximum rows returned. The default caps the History page.
+
+    Returns:
+        Matching records without their params or logs -- fetch those with
+        :func:`query_params` and :func:`query_logs` when a row is opened.
+    """
     clauses = []
     args: list = []
     if tool_id:
@@ -194,6 +282,14 @@ def query_records(
 
 
 def query_params(record_id: int) -> list[ExecutionParam]:
+    """Return the argument snapshot of one run, for display or replay.
+
+    Args:
+        record_id: The run to read.
+
+    Returns:
+        Its parameters, in insertion order (the method's signature order).
+    """
     with _conn() as con:
         rows = con.execute(
             "SELECT record_id, param_name, param_value, param_type FROM execution_params WHERE record_id=?",
@@ -203,6 +299,14 @@ def query_params(record_id: int) -> list[ExecutionParam]:
 
 
 def query_logs(record_id: int) -> list[ExecutionLog]:
+    """Return the full console output of one run.
+
+    Args:
+        record_id: The run to read.
+
+    Returns:
+        Its lines ordered by ``seq``.
+    """
     with _conn() as con:
         rows = con.execute(
             "SELECT record_id, seq, level, message, logged_at FROM execution_log WHERE record_id=? ORDER BY seq",
@@ -212,6 +316,14 @@ def query_logs(record_id: int) -> list[ExecutionLog]:
 
 
 def delete_records(record_ids: list[int]) -> None:
+    """Delete runs, cascading to their params and logs.
+
+    Args:
+        record_ids: Ids to remove. An empty list is a no-op.
+
+    Note:
+        Space is not reclaimed on disk; only :func:`clear_all_records` vacuums.
+    """
     if not record_ids:
         return
     placeholders = ",".join("?" * len(record_ids))

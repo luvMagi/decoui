@@ -7,7 +7,12 @@ from PySide6.QtWidgets import QApplication
 
 from decoui import tool, toolset
 from decoui.registry import build_tree
-from decoui.runner import _create_instances, _run_startup_hook, _run_toolset_hooks
+from decoui.runner import (
+    _check_explicit_toolsets,
+    _create_instances,
+    _run_startup_hook,
+    _run_toolset_hooks,
+)
 from decoui.ui.main_window import MainWindow
 
 
@@ -39,6 +44,59 @@ class LoadedTools:
 def _reset_creation_log() -> None:
     """Clear the construction log before each test."""
     LoadedTools.created = []
+
+
+@toolset(label="Other Tools")
+class OtherTools:
+    """Second toolset, used to prove an explicit list excludes the rest."""
+
+    @tool(label="Ping")
+    def ping(self) -> None:
+        """Placeholder tool body."""
+
+
+def test_explicit_toolsets_keep_the_callers_order() -> None:
+    """Verify an explicit list is passed through unchanged."""
+    assert _check_explicit_toolsets([OtherTools, LoadedTools]) == [
+        OtherTools,
+        LoadedTools,
+    ]
+
+
+def test_explicit_toolsets_reject_an_empty_list() -> None:
+    """Verify an empty list is refused with its own message.
+
+    Auto-discovery finding nothing and the caller passing nothing are different
+    mistakes, so they must not share an error message.
+    """
+    with pytest.raises(RuntimeError) as excinfo:
+        _check_explicit_toolsets([])
+
+    assert "toolsets=[]" in str(excinfo.value)
+
+
+def test_explicit_toolsets_reject_an_undecorated_class() -> None:
+    """Verify a class without @toolset is named in the error."""
+
+    class NotAToolSet:
+        """Plain class that was never decorated."""
+
+    with pytest.raises(TypeError) as excinfo:
+        _check_explicit_toolsets([LoadedTools, NotAToolSet])
+
+    assert "NotAToolSet" in str(excinfo.value)
+
+
+def test_explicit_order_does_not_reach_the_tree() -> None:
+    """Verify build_tree still sorts by label, whatever order was passed.
+
+    Documented in gui_main(): an explicit list controls what loads, not the
+    order the navigation tree shows.
+    """
+    ordered = _check_explicit_toolsets([OtherTools, LoadedTools])
+    tree = build_tree(*ordered)
+
+    assert [ts.label for ts in tree] == ["Loaded Tools", "Other Tools"]
 
 
 def test_startup_hook_runs_once() -> None:

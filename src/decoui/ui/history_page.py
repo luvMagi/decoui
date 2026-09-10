@@ -39,7 +39,14 @@ _COL_RES   = 5
 
 
 def _format_size(num_bytes: int) -> str:
-    """Render a byte count as a short human-readable string."""
+    """Render a byte count as a short human-readable string.
+
+    Args:
+        num_bytes: Size in bytes.
+
+    Returns:
+        The size with a unit suffix, e.g. ``'1.2 MB'``.
+    """
     size = float(num_bytes)
     for unit in ("B", "KB", "MB", "GB"):
         if size < 1024 or unit == "GB":
@@ -49,9 +56,24 @@ def _format_size(num_bytes: int) -> str:
 
 
 class HistoryPage(QWidget):
+    """Browsable record of every run: filters, detail, replay, log, cleanup.
+
+    This page is why a decoui application can answer "what exactly did that run
+    do" after the fact -- which tool, which arguments, what it printed, how it
+    ended. Replay reads the recorded arguments back into a tool page rather than
+    re-running anything, so nothing is executed without the user pressing Run.
+    """
     replay_requested = Signal(str, dict)  # (tool_id, param_map)
 
     def __init__(self, tool_labels: dict[str, str], parent=None):
+        """Build the history table and its filter row.
+
+        Args:
+            tool_labels: Tool id to display label, used to populate the tool
+                filter. Ids missing from it still appear in rows, labelled from
+                the record itself.
+            parent: Qt parent widget.
+        """
         super().__init__(parent)
         self._tool_labels = tool_labels   # {tool_id: "ToolSet: Tool"}
         self._records: list[ExecutionRecord] = []
@@ -59,6 +81,7 @@ class HistoryPage(QWidget):
         self.refresh()
 
     def _build_ui(self):
+        """Assemble the filter row, the table and the detail strip."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
 
@@ -156,6 +179,12 @@ class HistoryPage(QWidget):
     # ── Refresh ───────────────────────────────────────────────────────────────
 
     def show_for_tool(self, tool_id: str):
+        """Filter the page to one tool, as the Replay button does.
+
+        Args:
+            tool_id: ``'ClassName.method_name'``. An id with no matching filter
+                entry falls back to an unfiltered refresh.
+        """
         for i in range(self._tool_filter.count()):
             if self._tool_filter.itemData(i) == tool_id:
                 self._tool_filter.setCurrentIndex(i)
@@ -163,6 +192,10 @@ class HistoryPage(QWidget):
         self.refresh()
 
     def refresh(self):
+        """Re-query the database with the current filters and redraw the table.
+
+        Called after every mutation, so the table never shows deleted rows.
+        """
         tool_id = self._tool_filter.currentData()
         status  = self._status_filter.currentData()
         days    = self._range_filter.currentData() or 0
@@ -228,6 +261,11 @@ class HistoryPage(QWidget):
     # ── Checkbox helpers ──────────────────────────────────────────────────────
 
     def _checked_rows(self) -> list[int]:
+        """Return the row indexes whose checkbox is ticked.
+
+        Returns:
+            Table row indexes, not record ids.
+        """
         return [
             r for r in range(self._table.rowCount())
             if self._table.item(r, _COL_CHECK) and
@@ -235,6 +273,7 @@ class HistoryPage(QWidget):
         ]
 
     def _select_all(self):
+        """Tick every checkbox currently in the table."""
         for r in range(self._table.rowCount()):
             item = self._table.item(r, _COL_CHECK)
             if item:
@@ -242,6 +281,7 @@ class HistoryPage(QWidget):
         self._update_delete_btn()
 
     def _deselect_all(self):
+        """Clear every checkbox in the table."""
         for r in range(self._table.rowCount()):
             item = self._table.item(r, _COL_CHECK)
             if item:
@@ -249,9 +289,16 @@ class HistoryPage(QWidget):
         self._update_delete_btn()
 
     def _update_delete_btn(self):
+        """Enable the delete button only while something is ticked."""
         self._delete_sel_btn.setEnabled(len(self._checked_rows()) > 0)
 
     def _delete_selected(self):
+        """Delete the ticked runs, cascading to their params and logs.
+
+        Irreversible, and deliberately without a confirmation dialog -- the
+        checkboxes are the confirmation. Disk space is not reclaimed here; only
+        Clear History vacuums.
+        """
         rows = self._checked_rows()
         ids = [self._records[r].id for r in rows if r < len(self._records)]
         delete_records(ids)
@@ -260,12 +307,26 @@ class HistoryPage(QWidget):
     # ── Row click ─────────────────────────────────────────────────────────────
 
     def _on_current_cell_changed(self, row: int, col: int, prev_row: int, _prev_col: int):
+        """Show the detail strip when keyboard navigation changes rows.
+
+        Args:
+            row: The newly current row.
+            col: The newly current column, unused.
+            prev_row: The previously current row.
+            _prev_col: The previous column, unused.
+        """
         if row != prev_row and row >= 0:
             item = self._table.item(row, _COL_TOOL)
             if item:
                 self._on_item_clicked(item)
 
     def _on_item_clicked(self, item: QTableWidgetItem):
+        """Select a run and show its recorded arguments.
+
+        Args:
+            item: The clicked cell. A click in the checkbox column only updates
+                the delete button; it does not change the selected run.
+        """
         row = item.row()
         if row >= len(self._records):
             return
@@ -285,6 +346,12 @@ class HistoryPage(QWidget):
     # ── Detail actions ────────────────────────────────────────────────────────
 
     def _do_replay(self):
+        """Emit the selected run's arguments for a tool page to restore.
+
+        Values are read back with ``json.loads`` and fall back to the raw stored
+        string when that fails -- the snapshot is lossy, so a Path replays as
+        its string form and is re-coerced when the tool is run again.
+        """
         if not self._selected_record:
             return
         params = query_params(self._selected_record.id)
@@ -297,6 +364,7 @@ class HistoryPage(QWidget):
         self.replay_requested.emit(self._selected_record.tool_id, param_map)
 
     def _view_log(self):
+        """Open the selected run's stored console output in a log window."""
         if not self._selected_record:
             return
         logs = query_logs(self._selected_record.id)
@@ -305,6 +373,11 @@ class HistoryPage(QWidget):
         self._open_log_windows.append(dlg)
 
     def _context_menu(self, pos):
+        """Offer row deletion for the current table selection.
+
+        Args:
+            pos: Click position in table viewport coordinates.
+        """
         rows = list({idx.row() for idx in self._table.selectedIndexes()})
         if not rows:
             return
@@ -314,6 +387,11 @@ class HistoryPage(QWidget):
         menu.exec(self._table.viewport().mapToGlobal(pos))
 
     def _delete_rows(self, rows: list[int]):
+        """Delete runs by table row index.
+
+        Args:
+            rows: Row indexes to remove; they are mapped to record ids here.
+        """
         ids = [self._records[r].id for r in rows if r < len(self._records)]
         delete_records(ids)
         self.refresh()

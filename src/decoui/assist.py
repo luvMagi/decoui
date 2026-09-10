@@ -9,6 +9,38 @@ Three opt-in features declared on ``@tool``:
 Lookup and cascade callbacks run on a dedicated background thread pool so a slow
 data source can never freeze the GUI or delay an actual tool run. Callbacks are
 plain synchronous user code and must not touch Qt objects.
+
+Writing the callbacks
+---------------------
+
+Each of the three accepts a **method name** (a string), a callable, or -- for
+``completions`` -- a plain list. Prefer the method name: decorator arguments are
+evaluated at import time, so a callable defined there cannot see ``self``, while
+a named method is bound to the live instance when the page is built.
+
+Arity is adapted, so declare only the arguments actually needed::
+
+    completions / cascade   () | (value) | (value, form)
+    defaults                () | (form)
+
+``value`` is the parameter's current text; ``form`` is a snapshot of every
+field as ``{name: value}``. A cascade returns ``{other_param: new_value}`` and
+may name any subset of the form -- unknown names are reported as a warning
+rather than raising.
+
+Constraints worth knowing:
+
+* Callbacks run **off the GUI thread**. Never create or touch a widget in one,
+  and do not rely on their ordering relative to a tool run.
+* Completion candidates are normalised: non-strings are coerced, blanks and
+  duplicates dropped, and the list is truncated. Returning thousands of entries
+  is safe but pointless.
+* Completions only attach to text-like fields. Declaring them on a number,
+  check box or dropdown is rejected when the application starts.
+* A callback that raises does not break the form: the failure surfaces as a
+  warning and the field is simply left alone.
+* Cascades are suspended while a run is in progress and while history replay
+  restores values, so they cannot overwrite what is being replayed.
 """
 from __future__ import annotations
 
@@ -704,6 +736,13 @@ class CascadeController(QObject):
             widget: The parameter's input widget.
         """
         def on_commit(*_args: Any) -> None:
+            """Forward a widget commit, discarding whatever the signal carried.
+
+            Args:
+                *_args: Signal payload; ignored because the parameter name is
+                    captured from the enclosing scope and the current value is
+                    read back from the form.
+            """
             self.notify_commit(name)
 
         # _PathWidget exposes an explicit commit signal covering both the inner
@@ -932,9 +971,13 @@ def validate_assist_config(
     tool_label: str,
     cls: type,
     params: list[Any],
+    *,
+    placeholders: dict[str, str],
+    labels: dict[str, str],
     completions: dict[str, Any],
     cascade: dict[str, Any],
     defaults: Any,
+    on_cancel: Any = None,
 ) -> None:
     """Validate assist declarations against a tool's signature.
 
@@ -942,18 +985,36 @@ def validate_assist_config(
         tool_label: The tool's display label, used in error messages.
         cls: The toolset class, used to check method-name specs.
         params: The tool's ParamInfo list.
+        placeholders: The declared placeholder text map.
+        labels: The declared form label map.
         completions: The declared completions map.
         cascade: The declared cascade map.
         defaults: The declared defaults spec.
+        on_cancel: The declared cancel-cleanup spec, if any.
 
     Raises:
         ValueError: If a key does not name a parameter of the tool.
-        TypeError: If a spec has an unsupported type or targets an
-            unsupported widget.
+        TypeError: If a spec has an unsupported type, targets an unsupported
+            widget, or a placeholder/label value is not a str.
         AttributeError: If a method-name spec does not exist on the class.
     """
     known = {param.name: param for param in params}
     available = ", ".join(known) or "(none)"
+
+    # Text maps first: a mistyped key here used to fail silently, which is the
+    # one failure mode a form author cannot see.
+    for where, texts in (("placeholders", placeholders), ("labels", labels)):
+        for name, text in texts.items():
+            if name not in known:
+                raise ValueError(
+                    f"@tool('{tool_label}') {where} references unknown parameter "
+                    f"'{name}'; available: {available}"
+                )
+            if not isinstance(text, str):
+                raise TypeError(
+                    f"@tool('{tool_label}') {where}['{name}'] must be str, "
+                    f"got {type(text).__name__}"
+                )
 
     for name, spec in completions.items():
         if name not in known:
@@ -969,7 +1030,10 @@ def validate_assist_config(
             )
         if isinstance(spec, (list, tuple)):
             continue
-        _check_callable_spec(tool_label, cls, f"completions['{name}']", spec)
+        _check_callable_spec(
+            tool_label, cls, f"completions['{name}']", spec,
+            allowed="a list, a callable, or a method name",
+        )
 
     for name, spec in cascade.items():
         if name not in known:
@@ -978,6 +1042,9 @@ def validate_assist_config(
                 f"'{name}'; available: {available}"
             )
         _check_callable_spec(tool_label, cls, f"cascade['{name}']", spec)
+
+    if on_cancel is not None:
+        _check_callable_spec(tool_label, cls, "on_cancel", on_cancel)
 
     if not defaults:
         return
@@ -989,10 +1056,15 @@ def validate_assist_config(
                     f"'{name}'; available: {available}"
                 )
         return
-    _check_callable_spec(tool_label, cls, "defaults", defaults)
+    _check_callable_spec(
+        tool_label, cls, "defaults", defaults,
+        allowed="a dict, a callable, or a method name",
+    )
 
 
-def _check_callable_spec(tool_label: str, cls: type, where: str, spec: Any) -> None:
+def _check_callable_spec(
+    tool_label: str, cls: type, where: str, spec: Any, allowed: str = "a callable or a method name"
+) -> None:
     """Verify that a callback spec is callable or names a class method.
 
     Args:
@@ -1000,6 +1072,8 @@ def _check_callable_spec(tool_label: str, cls: type, where: str, spec: Any) -> N
         cls: The toolset class the method name is looked up on.
         where: Human-readable location, e.g. ``cascade['service']``.
         spec: The declared spec.
+        allowed: What the caller accepts, quoted back in the TypeError. Only
+            ``completions`` also takes a plain list, so the default omits it.
 
     Raises:
         TypeError: If the spec is neither a string nor callable.
@@ -1020,8 +1094,8 @@ def _check_callable_spec(tool_label: str, cls: type, where: str, spec: Any) -> N
         return
     if not callable(spec):
         raise TypeError(
-            f"@tool('{tool_label}') {where} must be a list, a callable, or a method "
-            f"name; got {type(spec).__name__}"
+            f"@tool('{tool_label}') {where} must be {allowed}; "
+            f"got {type(spec).__name__}"
         )
 
 

@@ -8,10 +8,23 @@ from ..registry import ToolInfo, ToolSetInfo
 
 
 class NavTree(QWidget):
+    """Searchable sidebar listing every toolset and its tools.
+
+    Groups come from ``@toolset(label=...)``, leaves from ``@tool(label=...)``,
+    both already sorted by label in the registry. Search and tag filters only
+    hide rows -- nothing is unloaded, and a hidden tool is still reachable
+    through history replay.
+    """
     tool_selected = Signal(object)   # ToolInfo
     history_requested = Signal()
 
     def __init__(self, tree: list[ToolSetInfo], parent=None):
+        """Build the tree widget over a tool tree.
+
+        Args:
+            tree: The toolsets to list.
+            parent: Qt parent widget.
+        """
         super().__init__(parent)
         self._tree = tree
         self._active_tags: set[str] = set()
@@ -34,6 +47,7 @@ class NavTree(QWidget):
         self._populate()
 
     def _populate(self):
+        """Rebuild the visible rows from the search text and active tags."""
         self._tw.clear()
         query = self._search.text().lower()
 
@@ -64,17 +78,36 @@ class NavTree(QWidget):
                 ts_item.setExpanded(True)
 
     def _filter(self):
+        """Re-run filtering after the search box changed."""
         self._populate()
 
     def set_active_tags(self, tags: set[str]):
+        """Restrict the tree to toolsets carrying all of these tags.
+
+        Args:
+            tags: Active tag set. Empty means no tag filtering. The match is an
+                AND: a toolset must carry every active tag to stay visible.
+        """
         self._active_tags = tags
         self._populate()
 
     def _on_current_changed(self, current: QTreeWidgetItem, _prev):
+        """Announce the newly highlighted tool.
+
+        Args:
+            current: The item now selected.
+            _prev: The previous item, unused.
+        """
         if current:
             self._on_item_clicked(current, 0)
 
     def _on_item_clicked(self, item: QTreeWidgetItem, _col: int):
+        """Announce a click, which opens the tool even if already selected.
+
+        Args:
+            item: The clicked item.
+            _col: The clicked column, unused.
+        """
         data = item.data(0, Qt.ItemDataRole.UserRole)
         if isinstance(data, ToolInfo):
             self.tool_selected.emit(data)
