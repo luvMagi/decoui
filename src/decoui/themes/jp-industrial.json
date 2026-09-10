@@ -60,6 +60,7 @@
     "text.on_topbar": "#1f1e17",
     "text.primary": "#1f1e17",
     "text.required": "#8e2f16",
+    "text.link": "#17456e",
     "text.secondary": "#2c2b21",
     "text.tab_selected": "#754108"
   },

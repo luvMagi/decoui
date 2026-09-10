@@ -105,6 +105,10 @@ COLOR_TOKENS: frozenset[str] = frozenset({
     "text.on_danger",
     "text.on_neutral",
     "text.required",       # the asterisk marking a required field
+    "text.link",           # cross-references in the Help window's pages. Its
+                           # own token rather than `accent`: accent is a fill
+                           # colour, and a link that matches the selection
+                           # highlight reads as a selected thing, not a link.
     "text.button",
     "text.on_sidebar",     # the tool list -- separate so the sidebar may be dark
     "text.on_sidebar_selected",
@@ -791,7 +795,9 @@ def active_theme_dir() -> Path:
 def set_active_theme(theme: Theme) -> None:
     """Record the theme the application is running under.
 
-    Called once, from gui_main(), before any widget is built.
+    Called from gui_main() before any widget is built, and again from
+    :func:`decoui.ui.retheme.retheme_application` when the user picks a
+    different one. It records; applying the theme is the caller's job.
 
     Args:
         theme: The theme whose stylesheet was applied.
@@ -821,29 +827,69 @@ def active_theme() -> Theme:
     return _ACTIVE_THEME
 
 
+def theme_font(theme: Theme):
+    """Build the application font a theme asks for.
+
+    The families are tried in order and Qt falls back through them, so the same
+    theme renders on Windows, macOS and Linux without per-platform code.
+
+    Args:
+        theme: The theme supplying the family stack and point size.
+
+    Returns:
+        A QFont ready for ``QApplication.setFont``.
+    """
+    from PySide6.QtGui import QFont
+
+    font = QFont()
+    font.setFamilies(list(theme.font.family))
+    font.setPointSize(theme.font.size_pt)
+    return font
+
+
 def apply_label_case(widget) -> None:
-    """Render a widget's label in capitals when the theme asks for it.
+    """Render a widget's label in the case the theme asks for.
 
     Qt's stylesheet dialect has no ``text-transform``, so this goes through the
     font instead. The widget's ``text()`` is left alone -- only its rendering
     changes -- which matters because tab titles double as lookup keys and a tag
     pill's text is the tag itself.
 
+    Both cases are set, not just capitals: switching from an uppercase theme to
+    a mixed-case one has to be able to undo what the first one did, and a
+    widget's font keeps whatever capitalization was last written to it.
+
+    Only widgets that disagree with the theme are touched. ``setFont`` marks a
+    widget's font as its own and stops it inheriting the application's, so a
+    theme that never asked for capitals leaves every font exactly as Qt
+    resolved it.
+
     Args:
         widget: Any widget with a font. Applied to it and to every push button
             and tab bar beneath it.
+
+    Note:
+        Under a re-theme this must run **after** the new stylesheet is
+        installed. The QSS ``QWidget`` rule pins each control's family and
+        size, which is what stops the capitals reaching the console and the
+        input fields; run first, it has nothing to be pinned by.
     """
     from PySide6.QtGui import QFont
     from PySide6.QtWidgets import QPushButton, QTabBar
 
-    if not active_theme().font.uppercase:
-        return
+    wanted = (
+        QFont.Capitalization.AllUppercase
+        if active_theme().font.uppercase
+        else QFont.Capitalization.MixedCase
+    )
     targets = [widget]
     targets += widget.findChildren(QPushButton)
     targets += widget.findChildren(QTabBar)
     for target in targets:
         font = target.font()
-        font.setCapitalization(QFont.Capitalization.AllUppercase)
+        if font.capitalization() == wanted:
+            continue
+        font.setCapitalization(wanted)
         target.setFont(font)
 
 

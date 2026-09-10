@@ -266,12 +266,17 @@ class ToolSetHelp:
     """One sidebar group in the Help panel.
 
     Attributes:
+        set_id: Stable identity, the decorated class's name. Shares its shape
+            with :attr:`ToolHelp.tool_id`, which is ``'ClassName.method'`` --
+            so a group and its tools are addressed by the same scheme, and a
+            cross-reference in a docstring can name either.
         label: Group name.
         summary: Class docstring summary line.
         description: Class docstring prose.
         tools: The group's tools, in the order build_tree sorted them.
     """
 
+    set_id: str
     label: str
     summary: str
     description: str
@@ -326,6 +331,7 @@ def build_help(tree: list) -> list[ToolSetHelp]:
     for toolset_info in tree:
         parsed = parse_docstring(getattr(toolset_info.cls, "__doc__", None))
         result.append(ToolSetHelp(
+            set_id=toolset_info.cls.__name__,
             label=toolset_info.label,
             summary=parsed.summary,
             description=parsed.description,
