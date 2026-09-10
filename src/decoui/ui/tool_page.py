@@ -37,6 +37,7 @@ from ..assist import (
 )
 from ..engine.executor import ExecutionEngine
 from ..registry import ToolInfo
+from ..i18n import t
 from ..theme import active_theme, apply_label_case
 from ..widget_builder import (
     build_widget,
@@ -209,7 +210,7 @@ class ToolPage(QWidget):
         )
         self._status_label = QLabel("", self)
         self._status_label.setStyleSheet("background: transparent;")
-        self._param_toggle_btn = QPushButton("▼ Parameters", self)
+        self._param_toggle_btn = QPushButton(t("tool.parameters_expanded"), self)
         self._param_toggle_btn.setCheckable(True)
         self._param_toggle_btn.setChecked(True)
         self._param_toggle_btn.clicked.connect(self._toggle_params)
@@ -267,17 +268,17 @@ class ToolPage(QWidget):
         # ── Action buttons ────────────────────────────────────────────────────
         btn_row = QHBoxLayout()
         btn_row.setSpacing(6)
-        self._run_btn = QPushButton("▶  Run", self)
+        self._run_btn = QPushButton(t("tool.run"), self)
         self._run_btn.setObjectName("run_btn")
         self._run_btn.setDefault(True)
         self._run_btn.clicked.connect(self._on_run)
-        self._reset_btn = QPushButton("↺  Reset", self)
+        self._reset_btn = QPushButton(t("tool.reset"), self)
         self._reset_btn.clicked.connect(self._reset_params)
-        self._stop_btn = QPushButton("■  Stop", self)
+        self._stop_btn = QPushButton(t("tool.stop"), self)
         self._stop_btn.setObjectName("stop_btn")
         self._stop_btn.setVisible(False)
         self._stop_btn.clicked.connect(self._engine.cancel)
-        self._replay_btn = QPushButton("Replay", self)
+        self._replay_btn = QPushButton(t("tool.replay"), self)
         self._replay_btn.clicked.connect(
             lambda: self.history_requested.emit(self._tool.tool_id)
         )
@@ -291,18 +292,18 @@ class ToolPage(QWidget):
         # ── Output section header ─────────────────────────────────────────────
         out_hdr = QHBoxLayout()
         out_hdr.setContentsMargins(0, 4, 0, 0)
-        out_lbl = QLabel("Output", self)
+        out_lbl = QLabel(t("tool.output"), self)
         out_lbl.setStyleSheet(
             f"font-weight: bold; color: {_theme.colors['text.muted']}; "
             f"font-size: {_theme.font.small_size_pt:g}pt; background: transparent;"
         )
         out_hdr.addWidget(out_lbl)
         out_hdr.addStretch()
-        self._copy_btn = QPushButton("Copy", self)
+        self._copy_btn = QPushButton(t("tool.copy"), self)
         self._copy_btn.setFixedHeight(24)
         self._copy_btn.setStyleSheet(_small_button_style(_theme))
         self._copy_btn.clicked.connect(self._copy_console)
-        self._expand_btn = QPushButton("View Log", self)
+        self._expand_btn = QPushButton(t("tool.view_log"), self)
         self._expand_btn.setFixedHeight(24)
         self._expand_btn.setStyleSheet(_small_button_style(_theme))
         self._expand_btn.clicked.connect(self._expand_console)
@@ -412,7 +413,7 @@ class ToolPage(QWidget):
         self._anim.setEndValue(0)
         self._anim.start()
         self._param_toggle_btn.setChecked(False)
-        self._param_toggle_btn.setText("▶ Parameters")
+        self._param_toggle_btn.setText(t("tool.parameters_collapsed"))
 
     def _expand_params(self):
         """Animate the parameter panel open again."""
@@ -423,7 +424,7 @@ class ToolPage(QWidget):
         self._anim.setEndValue(self._param_panel.sizeHint().height() or 400)
         self._anim.start()
         self._param_toggle_btn.setChecked(True)
-        self._param_toggle_btn.setText("▼ Parameters")
+        self._param_toggle_btn.setText(t("tool.parameters_expanded"))
 
     def _toggle_params(self):
         """Open or close the parameter panel to match the toggle button."""
@@ -444,7 +445,8 @@ class ToolPage(QWidget):
         """
         if self._tool.confirm:
             reply = QMessageBox.question(
-                self, "Confirm", f"Run '{self._tool.label}'?",
+                self, t("tool.confirm_title"),
+                t("tool.confirm_body", tool=self._tool.label),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if reply != QMessageBox.StandardButton.Yes:
@@ -465,7 +467,7 @@ class ToolPage(QWidget):
         self._run_btn.setVisible(False)
         self._stop_btn.setVisible(True)
         self._progress.setVisible(True)
-        self._status_label.setText("Running…")
+        self._status_label.setText(t("tool.running"))
         self._status_label.setStyleSheet(_status_style("running"))
         self._set_params_readonly(True)
         self._collapse_params()
@@ -506,18 +508,18 @@ class ToolPage(QWidget):
         # run's percentage.
         self._progress.setRange(0, 0)
         self._run_btn.setVisible(True)
-        self._run_btn.setText("▶  Run Again")
+        self._run_btn.setText(t("tool.run_again"))
         self._stop_btn.setVisible(False)
         self._set_params_readonly(False)
 
         if status == "success":
-            self._status_label.setText(f"Done ({elapsed:.1f}s)")
+            self._status_label.setText(t("tool.done", elapsed=f"{elapsed:.1f}"))
             self._status_label.setStyleSheet(_status_style("success"))
         elif status == "error":
-            self._status_label.setText(f"Error ({elapsed:.1f}s)")
+            self._status_label.setText(t("tool.error", elapsed=f"{elapsed:.1f}"))
             self._status_label.setStyleSheet(_status_style("error"))
         else:
-            self._status_label.setText("Cancelled")
+            self._status_label.setText(t("tool.cancelled"))
             self._status_label.setStyleSheet(_status_style("cancelled"))
 
     def _append_log(self, level: str, message: str):

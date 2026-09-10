@@ -1,13 +1,14 @@
 """The application settings dialog.
 
-One dialog, one setting: which theme to run under. It is deliberately narrow --
-it exists because the theme mechanism needs a way in, not as a drawer for
-everything that might one day be configurable. Layout preferences that decoui
-already persists on its own (sidebar width, window geometry) stay where they
-are; they are remembered, not chosen.
+Two settings, and both for the same reason: the theme and the interface language
+are each applied once at startup and never swapped in a running window, so each
+needs somewhere to be chosen ahead of the next launch. This dialog is
+deliberately narrow -- it is not a drawer for everything that might one day be
+configurable. Layout preferences decoui persists on its own (sidebar width,
+window geometry) stay where they are; they are remembered, not chosen.
 
-Themes are applied once at startup, so this dialog records a choice and says so.
-Nothing about the running window changes when it closes.
+The dialog records choices and says a restart is needed. Nothing about the
+running window changes when it closes.
 """
 from __future__ import annotations
 
@@ -21,7 +22,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..storage.db import set_setting
+from ..storage.db import get_setting, set_setting
+from ..i18n import (
+    LANGUAGE_SETTING,
+    active_language,
+    available_languages,
+    language_name,
+    t,
+)
 from ..theme import (
     THEME_SETTING,
     active_theme,
@@ -31,23 +39,51 @@ from ..theme import (
 )
 
 
-class SettingsDialog(QDialog):
-    """Modal dialog for choosing the theme.
+def _preselect(combo: QComboBox, *, stored: str | None, in_effect: str) -> None:
+    """Point a combo box at the stored choice, or at what is really running.
 
-    The combo box lists every theme available right now -- built-in and
-    user-supplied alike -- and starts on the one **actually in effect**. That
-    matters when the stored choice could not be loaded: the dialog then shows
-    the theme the user is really looking at, not the one they asked for.
+    Both of this dialog's settings apply on the next launch, so between the
+    choice and the restart the two disagree. The stored value wins, because it
+    is what the user last said they wanted; the running value is the fallback
+    for when the stored one has since become unavailable.
+
+    Args:
+        combo: The box to move. Its items must carry their id as item data.
+        stored: The persisted choice, or None when nothing was ever chosen.
+        in_effect: Id of what the application actually started under.
+    """
+    for candidate in (stored, in_effect):
+        if candidate is None:
+            continue
+        index = combo.findData(candidate)
+        if index >= 0:
+            combo.setCurrentIndex(index)
+            return
+
+
+class SettingsDialog(QDialog):
+    """Modal dialog for choosing the theme and the interface language.
+
+    Both settings take effect on the next launch, so each dropdown starts on
+    **the stored choice** rather than on what the running window happens to be
+    showing. Otherwise a user who picked a theme, pressed OK and reopened the
+    dialog would find their choice apparently discarded -- it had been saved,
+    but the dialog was reporting the still-running old one.
+
+    A stored choice that is no longer available falls back to what is actually
+    in effect, which is the case the previous behaviour existed for: a theme
+    whose file has gone missing should not leave the dialog pointing at
+    something the user cannot see.
     """
 
     def __init__(self, parent: QWidget | None = None) -> None:
-        """Build the dialog and select the running theme.
+        """Build the dialog and preselect the stored theme and language.
 
         Args:
             parent: Qt parent, used to centre the dialog over the window.
         """
         super().__init__(parent)
-        self.setWindowTitle("Settings")
+        self.setWindowTitle(t("settings.title"))
         self.setModal(True)
         self.setMinimumWidth(360)
 
@@ -64,24 +100,39 @@ class SettingsDialog(QDialog):
             themes, _ = discover_themes(active_theme_dir())
         except Exception:
             themes = builtin_themes()
-        current = active_theme()
-
         self._combo = QComboBox(self)
         # Sorted by display name so the list is stable; duplicates are left as
         # they are, since the names are the user's own.
         for theme in sorted(themes.values(), key=lambda item: item.name.casefold()):
             self._combo.addItem(theme.name, theme.id)
-        index = self._combo.findData(current.id)
-        if index >= 0:
-            self._combo.setCurrentIndex(index)
+        _preselect(
+            self._combo,
+            stored=get_setting(THEME_SETTING),
+            in_effect=active_theme().id,
+        )
         self._initial_id = self._combo.currentData()
 
+        # Languages are labelled by their own name for themselves -- a reader
+        # looking for their language recognises "Deutsch", not "German", and by
+        # definition cannot read the current interface language well enough for
+        # the alternative to help.
+        self._language = QComboBox(self)
+        for code in available_languages():
+            self._language.addItem(language_name(code), code)
+        _preselect(
+            self._language,
+            stored=get_setting(LANGUAGE_SETTING),
+            in_effect=active_language(),
+        )
+        self._initial_language = self._language.currentData()
+
         form = QFormLayout()
-        form.addRow("Theme:", self._combo)
+        form.addRow(t("settings.theme"), self._combo)
+        form.addRow(t("settings.language"), self._language)
 
         # Permanent, not a reaction to changing the selection: the user should
         # know a restart is coming *before* they choose, not after.
-        note = QLabel("Changes take effect after restart.", self)
+        note = QLabel(t("settings.restart_note"), self)
         note.setWordWrap(True)
 
         buttons = QDialogButtonBox(
@@ -105,8 +156,16 @@ class SettingsDialog(QDialog):
         """
         return str(self._combo.currentData())
 
+    def selected_language(self) -> str:
+        """Return the language code currently shown in the combo box.
+
+        Returns:
+            The selected language's code.
+        """
+        return str(self._language.currentData())
+
     def accept(self) -> None:
-        """Persist the choice, but only when it actually changed.
+        """Persist the choices, but only those that actually changed.
 
         Writing an unchanged value would be a pointless database round-trip and
         would make the settings table's timestamps misleading.
@@ -114,4 +173,7 @@ class SettingsDialog(QDialog):
         chosen = self.selected_theme_id()
         if chosen != self._initial_id:
             set_setting(THEME_SETTING, chosen)
+        language = self.selected_language()
+        if language != self._initial_language:
+            set_setting(LANGUAGE_SETTING, language)
         super().accept()

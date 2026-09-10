@@ -15,6 +15,17 @@ What each toolset demonstrates::
                   loaded in on_startup()
 
 Note:
+    **A tool's docstring is written for the person using the tool**, not for the
+    person reading this file. It is the source the Help panel collects: the
+    summary line, the paragraphs under it and the ``Args:`` entries all reach
+    the screen. So they say what the field is for, never which Qt widget the
+    annotation happens to produce.
+
+    Notes aimed at whoever is copying this code -- which annotation builds which
+    widget, why a check is written the way it is -- live in ``#`` comments above
+    the method instead. Comments are not collected, so the two audiences stay
+    separated without either losing anything.
+
     **Logging needs a level set by the application.** decoui attaches its
     console handler to the root logger but does not change that logger's level,
     and an unconfigured root logger filters everything below WARNING. Several

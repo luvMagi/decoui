@@ -4,6 +4,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QLineEdit, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget
 
+from ..i18n import t
 from ..registry import ToolInfo, ToolSetInfo
 
 
@@ -33,7 +34,7 @@ class NavTree(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         self._search = QLineEdit(self)
-        self._search.setPlaceholderText("🔍 Search tools...")
+        self._search.setPlaceholderText(t("nav.search_placeholder"))
         self._search.textChanged.connect(self._filter)
         layout.addWidget(self._search)
 

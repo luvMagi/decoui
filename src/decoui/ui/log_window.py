@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..i18n import t
 from ..theme import active_theme
 
 LogEntry = namedtuple("LogEntry", ["level", "message"])
@@ -95,7 +96,7 @@ class LogWindow(QMainWindow):
             logs: The LogEntry sequence to display.
         """
         super().__init__(parent=None)
-        self.setWindowTitle(f"Log — {title}")
+        self.setWindowTitle(t("log.title", title=title))
         self.resize(820, 580)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
@@ -111,13 +112,13 @@ class LogWindow(QMainWindow):
         # ── Level filter buttons ──────────────────────────────────────────────
         level_row = QHBoxLayout()
         level_row.setSpacing(4)
-        level_row.addWidget(QLabel("Level:", central))
+        level_row.addWidget(QLabel(t("log.level"), central))
 
-        all_btn = QPushButton("All", central)
+        all_btn = QPushButton(t("common.all"), central)
         all_btn.clicked.connect(self._select_all_levels)
         level_row.addWidget(all_btn)
 
-        none_btn = QPushButton("None", central)
+        none_btn = QPushButton(t("common.none"), central)
         none_btn.clicked.connect(self._clear_all_levels)
         level_row.addWidget(none_btn)
 
@@ -134,9 +135,9 @@ class LogWindow(QMainWindow):
 
         # ── Search bar ────────────────────────────────────────────────────────
         search_row = QHBoxLayout()
-        search_row.addWidget(QLabel("Search:", central))
+        search_row.addWidget(QLabel(t("common.search"), central))
         self._search = QLineEdit(central)
-        self._search.setPlaceholderText("Filter log messages...")
+        self._search.setPlaceholderText(t("log.search_placeholder"))
         self._search.textChanged.connect(self._rerender)
         search_row.addWidget(self._search)
         layout.addLayout(search_row)
@@ -149,9 +150,9 @@ class LogWindow(QMainWindow):
 
         # ── Bottom bar ────────────────────────────────────────────────────────
         bottom_row = QHBoxLayout()
-        copy_btn = QPushButton("Copy All", central)
+        copy_btn = QPushButton(t("log.copy_all"), central)
         copy_btn.clicked.connect(self._copy_all)
-        close_btn = QPushButton("Close", central)
+        close_btn = QPushButton(t("common.close"), central)
         close_btn.clicked.connect(self.close)
         bottom_row.addStretch()
         bottom_row.addWidget(copy_btn)

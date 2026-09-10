@@ -24,6 +24,7 @@ from collections.abc import Sequence
 from typing import Callable
 
 from .decorators import _TOOL_ATTR, _TOOLSET_ATTR
+from .i18n import LANGUAGE_SETTING, set_language, t
 from .theme import (
     DEFAULT_THEME_ID,
     THEME_SETTING,
@@ -45,6 +46,7 @@ def gui_main(
     toolsets: Sequence[type] | None = None,
     theme: str | None = None,
     theme_dir: str | Path | None = None,
+    language: str | None = None,
 ) -> None:
     """Launch the decoui GUI application.
 
@@ -93,6 +95,12 @@ def gui_main(
         theme_dir: Directory scanned for user-supplied ``*.json`` themes.
             Defaults to ``~/.decoui/themes``. A missing directory is fine and
             is not created.
+        language: Code for the language decoui's **own** interface is drawn in
+            -- Run, Stop, the history columns. Like ``theme``, this is the
+            application's default and the user's choice in Settings wins over
+            it. A tool's own label, description and docstring are never
+            translated: they belong to the application, not to decoui.
+            Defaults to English.
 
     Raises:
         RuntimeError: If no @toolset class is visible in the calling namespace,
@@ -130,6 +138,10 @@ def gui_main(
     # is then applied before anything is built, because decoui never re-themes
     # a running window -- widgets read their colours as they are constructed.
     init_db()
+    # Language before the theme, and both before anything is built: the theme's
+    # own failure dialog is written in decoui's interface language, so the
+    # language has to be settled before there is anything to report.
+    set_language(get_setting(LANGUAGE_SETTING) or language)
     problems = _apply_startup_theme(app, theme, theme_dir)
 
     tree = build_tree(*toolset_classes)
@@ -221,8 +233,8 @@ def _apply_startup_theme(
         active = _builtin()[DEFAULT_THEME_ID]
         _apply_theme(app, active)
         return [StartupProblem(
-            source="Themes",
-            summary="theme loading failed; falling back to the light theme",
+            source=t("theme.problem_source"),
+            summary=t("theme.problem_summary"),
             detail=traceback.format_exc(),
         )]
 
@@ -360,11 +372,8 @@ def _show_startup_problems(problems: list[StartupProblem], parent=None) -> None:
 
     box = QMessageBox(parent)
     box.setIcon(QMessageBox.Icon.Warning)
-    box.setWindowTitle("Startup problems")
-    box.setText(
-        f"{len(problems)} startup step(s) failed.\n"
-        f"The application is running without them."
-    )
+    box.setWindowTitle(t("startup.title"))
+    box.setText(t("startup.text", count=len(problems)))
     box.setInformativeText(
         "\n".join(f"• {problem.source}\n    {problem.summary}" for problem in problems)
     )

@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..i18n import t
 from ..theme import active_theme
 
 
@@ -60,10 +61,12 @@ class TagBar(QWidget):
         tags_changed: Emitted with the set of active tags whenever a pill is
             toggled. The sidebar treats the set as an AND filter.
         settings_requested: Emitted when the settings button is pressed.
+        help_requested: Emitted when the help button is pressed.
     """
 
     tags_changed = Signal(set)   # set of active tag strings
     settings_requested = Signal()
+    help_requested = Signal()
 
     def __init__(self, all_tags: list[str], parent=None):
         """Build one pill per tag.
@@ -90,7 +93,7 @@ class TagBar(QWidget):
         outer.setContentsMargins(12, 2, 6, 2)
         outer.setSpacing(10)
 
-        label = QLabel("Tags:", self)
+        label = QLabel(t("topbar.tags"), self)
         # Without this the label paints the generic QWidget background from the
         # application stylesheet, punching a lighter rectangle out of the bar's
         # band -- which is why the band looked as if it started after the label.
@@ -131,7 +134,7 @@ class TagBar(QWidget):
         row.setSpacing(6)
 
         pill_style = _pill_style()
-        all_btn = QPushButton("All", container)
+        all_btn = QPushButton(t("common.all"), container)
         all_btn.setCheckable(True)
         all_btn.setChecked(True)
         all_btn.setStyleSheet(pill_style)
@@ -154,9 +157,16 @@ class TagBar(QWidget):
         # Added to the *outer* layout, deliberately: inside the scroll area it
         # would drift off-screen as soon as there were enough tags to scroll.
         # Out here it stays pinned to the top-right corner whatever happens.
-        settings_btn = QPushButton("\u2699", self)
+        help_btn = QPushButton(t("topbar.help"), self)
+        help_btn.setFixedWidth(36)
+        help_btn.setToolTip(t("topbar.help_tooltip"))
+        help_btn.clicked.connect(self.help_requested)
+        outer.addWidget(help_btn)
+        self._help_btn = help_btn
+
+        settings_btn = QPushButton(t("topbar.settings"), self)
         settings_btn.setFixedWidth(36)
-        settings_btn.setToolTip("Settings")
+        settings_btn.setToolTip(t("topbar.settings_tooltip"))
         settings_btn.clicked.connect(self.settings_requested)
         outer.addWidget(settings_btn)
         self._settings_btn = settings_btn

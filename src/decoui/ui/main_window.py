@@ -36,6 +36,7 @@ from ..registry import ToolInfo, ToolSetInfo
 from ..storage.db import get_setting, set_setting
 from .history_page import HistoryPage
 from .nav_tree import NavTree
+from ..i18n import t
 from ..theme import apply_label_case
 from .settings_dialog import SettingsDialog
 from .tag_bar import TagBar
@@ -70,12 +71,13 @@ class MainWindow(QMainWindow):
                 from the map are instantiated on first use.
         """
         super().__init__()
-        self.setWindowTitle(f"decoui — {title}")
+        self.setWindowTitle(t("app.window_title", title=title))
         self.resize(1100, 700)
 
         self._tree = tree
         self._tool_pages: dict[str, ToolPage] = {}
         self._instances: dict[type, object] = dict(instances or {})
+        self._help_window: QWidget | None = None
 
         # Collect all tags
         all_tags: list[str] = sorted({
@@ -123,7 +125,7 @@ class MainWindow(QMainWindow):
         self._nav = NavTree(tree, sidebar)
         sidebar_layout.addWidget(self._nav)
 
-        history_btn = QPushButton("History", sidebar)
+        history_btn = QPushButton(t("nav.history"), sidebar)
         history_btn.clicked.connect(self._show_history)
         sidebar_layout.addWidget(history_btn)
 
@@ -179,10 +181,37 @@ class MainWindow(QMainWindow):
         self._nav.tool_selected.connect(self._show_tool)
         self._tag_bar.tags_changed.connect(self._nav.set_active_tags)
         self._tag_bar.settings_requested.connect(self._open_settings)
+        self._tag_bar.help_requested.connect(self._open_help)
 
         # Capitals, when the theme asks for them. Done after everything is
         # built so it reaches the tag pills, the tab bar and every button.
         apply_label_case(self)
+
+    def _open_help(self) -> None:
+        """Open the help window, or raise the one already open.
+
+        One window, not one per press: help is a reference the reader keeps
+        beside the form, and a second copy of the same page helps nobody.
+
+        The reference is dropped on ``destroyed`` rather than being appended to
+        a list. ``WA_DeleteOnClose`` destroys the underlying C++ object, so a
+        kept reference is a dead wrapper that raises ``RuntimeError`` the moment
+        anything touches it.
+        """
+        if self._help_window is not None:
+            self._help_window.raise_()
+            self._help_window.activateWindow()
+            return
+
+        from .help_window import HelpWindow
+        window = HelpWindow(self._tree, self)
+        window.destroyed.connect(self._forget_help_window)
+        self._help_window = window
+        window.show()
+
+    def _forget_help_window(self) -> None:
+        """Clear the help window reference once Qt has destroyed it."""
+        self._help_window = None
 
     def _open_settings(self) -> None:
         """Open the settings dialog.
@@ -240,7 +269,7 @@ class MainWindow(QMainWindow):
         button.setIcon(QIcon(str(tab_close_icon_path())))
         button.setIconSize(QSize(_CLOSE_ICON_SIZE, _CLOSE_ICON_SIZE))
         button.setFixedSize(_CLOSE_BUTTON_SIZE, _CLOSE_BUTTON_SIZE)
-        button.setToolTip("Close Tab")
+        button.setToolTip(t("tabs.close"))
         button.setCursor(Qt.CursorShape.ArrowCursor)
         button.clicked.connect(lambda: self._close_tab_holding(holder))
         row.addWidget(button)
@@ -306,9 +335,9 @@ class MainWindow(QMainWindow):
             A context menu containing close actions for the selected tab.
         """
         menu = QMenu(self)
-        close_tab_action = menu.addAction("Close Tab")
-        close_other_tabs_action = menu.addAction("Close Others")
-        close_all_tabs_action = menu.addAction("Close All")
+        close_tab_action = menu.addAction(t("tabs.close"))
+        close_other_tabs_action = menu.addAction(t("tabs.close_others"))
+        close_all_tabs_action = menu.addAction(t("tabs.close_all"))
         close_other_tabs_action.setEnabled(self._tabs.count() > 1)
         close_tab_action.triggered.connect(
             lambda _checked=False: self._close_tool_tab(index)
