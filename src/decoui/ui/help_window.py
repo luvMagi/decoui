@@ -713,7 +713,7 @@ code {{ font-family: {', '.join(font.mono_family)};
    a block, and the console is the reader's reference for what code looks like
    in this application. */
 pre {{ font-family: {', '.join(font.mono_family)};
-       background: {colors['bg.console']}; color: {colors['console.stdout']};
+       background: {colors['bg.console']}; color: {colors['console.plain']};
        border: 1px solid {colors['border.console']};
        padding: 8px 10px; margin: 1em 0; }}
 /* Headings an author writes, which start at h2: h1 is the page title and is

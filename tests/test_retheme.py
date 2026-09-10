@@ -113,7 +113,7 @@ def recoloured(tmp_path: Path) -> Theme:
     path = tmp_path / "recoloured.json"
     path.write_text(json.dumps({
         "version": 1, "id": "recoloured", "name": "Recoloured",
-        "extends": "light", "colors": {"console.error": "#00ccff"},
+        "extends": "light", "colors": {"console.body.error": "#00ccff"},
     }), encoding="utf-8")
     return load_theme(path)
 
@@ -212,17 +212,21 @@ def test_lines_already_printed_are_re_inked(
     colour is a character format, written once as each line arrived.
 
     The theme here is written for the test rather than taken from the built-ins,
-    which happen to agree on all six console colours -- against those, a page
-    that re-inked nothing would pass.
+    which happen to agree on every console colour -- against those, a page that
+    re-inked nothing would pass.
+
+    ``"it failed"`` carries no timestamp prefix, so it is inked as one span in
+    the body colour: the worker emits an unformatted line for an unhandled
+    exception, and that is the shape being read here.
     """
     page = ToolPage(_info("Echo"), _ThemeTools())
     page._append_log("ERROR", "it failed")
-    assert _first_line_colour(page) == builtin_themes()[_FROM].colors["console.error"]
+    assert _first_line_colour(page) == builtin_themes()[_FROM].colors["console.body.error"]
 
     retheme_application(recoloured)
 
     assert page._console.toPlainText() == "it failed\n"
-    assert _first_line_colour(page) == recoloured.colors["console.error"]
+    assert _first_line_colour(page) == recoloured.colors["console.body.error"]
 
 
 def _first_line_colour(page: ToolPage) -> str:
@@ -255,16 +259,15 @@ def test_the_level_cache_is_refreshed_rather_than_abandoned(
 
     retheme_application(builtin_themes()[_TO])
 
-    assert page._level_colors == {
-        level: builtin_themes()[_TO].colors[token]
-        for level, token in {
-            "stdout": "console.stdout",
-            "DEBUG": "console.debug",
-            "INFO": "console.info",
-            "WARNING": "console.warning",
-            "ERROR": "console.error",
-            "CRITICAL": "console.critical",
-        }.items()
+    colors = builtin_themes()[_TO].colors
+    assert page._level_inks == {
+        "stdout":   (None, colors["console.plain"]),
+        "DEBUG":    (colors["console.tag.debug"], colors["console.body.debug"]),
+        "INFO":     (colors["console.tag.info"], colors["console.body.info"]),
+        "WARNING":  (colors["console.tag.warning"], colors["console.body.warning"]),
+        "ERROR":    (colors["console.tag.error"], colors["console.body.error"]),
+        "CRITICAL": (colors["console.tag.critical"],
+                     colors["console.body.critical"]),
     }
 
 

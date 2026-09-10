@@ -363,6 +363,8 @@ class DemoTools:
 
         Useful for seeing the console colours and the level filter in the log
         window. ``print`` output arrives as level ``'stdout'``.
+        
+        this is link sample: [[DemoTools.log_demo]]
 
         Args:
             message: Text appended to each line.
@@ -370,12 +372,15 @@ class DemoTools:
         Returns:
             A confirmation string.
         """
+        # No level name in the text: the formatter already writes one, and the
+        # console inks it apart from the message. Repeating it here printed the
+        # level twice on every line.
         print(f"stdout: {message}")
-        logging.debug("DEBUG: %s", message)
-        logging.info("INFO: %s", message)
-        logging.warning("WARNING: %s", message)
-        logging.error("ERROR: %s", message)
-        logging.critical("CRITICAL: %s", message)
+        logging.debug("checking preconditions -- %s", message)
+        logging.info("started -- %s", message)
+        logging.warning("running low on room -- %s", message)
+        logging.error("one step failed -- %s", message)
+        logging.critical("giving up -- %s", message)
         return "Emitted one line at each level."
 
     @tool(

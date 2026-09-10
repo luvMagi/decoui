@@ -23,11 +23,15 @@ import pytest
 from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QApplication, QComboBox, QWidget
 
+from decoui.example import TextTools
+from decoui.registry import build_tree
 from decoui.storage.db import init_db, set_db_path
 from decoui.theme import Theme, builtin_themes, set_active_theme
 from decoui.ui.history_page import HistoryPage
+from decoui.ui.nav_tree import NavTree
 from decoui.ui.retheme import retheme_application
 from decoui.ui.tag_bar import TagBar
+from decoui.widget_builder import _PathWidget
 
 
 @pytest.fixture()
@@ -105,3 +109,70 @@ def test_a_container_never_styles_itself_without_a_selector(
         and "{" not in widget.styleSheet()
     ]
     assert not offenders
+
+
+@pytest.mark.parametrize("theme_id", sorted(builtin_themes()))
+def test_the_sidebar_selection_never_falls_back_to_qt_blue(
+    themed: QApplication, theme_id: str
+) -> None:
+    """Verify the tool list's Highlight role comes from the theme.
+
+    The selected row's fill and ink are QSS, but the platform style also paints
+    that row's focus outline and takes the colour from the palette, which no
+    theme had ever set. Under Fusion that left a bright blue four-cornered box
+    in the indent column of whichever tool was selected -- in a colour no theme
+    contained.
+
+    Args:
+        themed: The application, ready to be themed.
+        theme_id: The built-in theme under test.
+    """
+    theme: Theme = builtin_themes()[theme_id]
+    retheme_application(theme)
+    nav = NavTree(build_tree(TextTools))
+    nav.show()
+
+    palette = nav._tw.palette()
+    assert palette.color(QPalette.ColorRole.Highlight).name().lower() == (
+        theme.colors["bg.tree_selected"].lower()
+    )
+    assert palette.color(QPalette.ColorRole.HighlightedText).name().lower() == (
+        theme.colors["text.on_sidebar_selected"].lower()
+    )
+
+
+def test_a_retheme_moves_the_sidebar_selection_palette(themed: QApplication) -> None:
+    """Verify the palette is refreshed rather than left on the old theme.
+
+    It is set in code, so nothing about swapping the application stylesheet
+    reaches it; only NavTree.retheme() does.
+
+    Args:
+        themed: The application, ready to be themed.
+    """
+    retheme_application(builtin_themes()["light"])
+    nav = NavTree(build_tree(TextTools))
+    nav.show()
+
+    retheme_application(builtin_themes()["cockpit"])
+
+    assert nav._tw.palette().color(QPalette.ColorRole.Highlight).name().lower() == (
+        builtin_themes()["cockpit"].colors["bg.tree_selected"].lower()
+    )
+
+
+def test_the_path_pickers_never_clip_their_labels(themed: QApplication) -> None:
+    """Verify both picker buttons are at least as wide as their own text.
+
+    They used to carry a fixed 72px, chosen against "File..." -- which clipped
+    every longer translation, Japanese included at 93px, and clipped further
+    under a theme that sets capitals or letter-spacing.
+    """
+    retheme_application(builtin_themes()["light"])
+    widget = _PathWidget()
+    widget.resize(420, 32)
+    widget.show()
+
+    for button in (widget._file_btn, widget._dir_btn):
+        assert button.width() >= button.sizeHint().width()
+    assert widget._file_btn.width() == widget._dir_btn.width()

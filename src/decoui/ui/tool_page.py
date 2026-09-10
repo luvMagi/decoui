@@ -11,7 +11,7 @@ from PySide6.QtCore import (
     QPropertyAnimation,
     Signal,
 )
-from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
+from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
     QFrame,
     QApplication,
@@ -47,11 +47,19 @@ from ..widget_builder import (
     set_value,
 )
 from .icons import theme_icon
-from .log_window import LogEntry, LogWindow, console_style, default_color, level_colors
+from .log_window import (
+    LogEntry,
+    LogWindow,
+    console_style,
+    default_color,
+    insert_log_line,
+    level_inks,
+    timestamp_color,
+)
 
 #: Status badge -> the theme colour token that inks it.
 _STATUS_INK = {
-    "running": "text.on_accent",
+    "running": "text.on_running",
     "success": "text.on_success",
     "error": "text.on_danger",
     "cancelled": "text.on_neutral",
@@ -59,7 +67,7 @@ _STATUS_INK = {
 
 #: Status badge -> the theme colour token that fills it.
 _STATUS_TOKENS = {
-    "running": "accent",
+    "running": "running",
     "success": "success",
     "error": "danger",
     "cancelled": "neutral",
@@ -163,11 +171,12 @@ class ToolPage(QWidget):
         # The asterisk is inked inside rich text, which no stylesheet reaches.
         self._required_labels: list[tuple[QLabel, str]] = []
         # Read once, here: _append_log runs per output line, and rebuilding the
-        # level mapping there put a file read and a full theme validation on the
+        # ink mapping there put a file read and a full theme validation on the
         # GUI thread for every line the tool printed. A re-theme refreshes both
         # -- see retheme() -- rather than moving the lookup back onto that path.
-        self._level_colors = level_colors()
+        self._level_inks = level_inks()
         self._default_color = default_color()
+        self._timestamp_color = timestamp_color()
         self._assist_runner = assist_runner or AssistRunner()
         self._completions: dict[str, CompletionController] = {}
         self._cascade: CascadeController | None = None
@@ -335,8 +344,8 @@ class ToolPage(QWidget):
         if self._desc is not None:
             self._desc.setStyleSheet(
                 f"color: {colors['text.muted']};"
-                f"border: {shape['shape.border_width']:g}px solid "
-                f"{colors['border.subtle']};"
+                f"border: {shape['shape.border_width_panel']:g}px "
+                f"{shape['shape.border_style_panel']} {colors['border.subtle']};"
                 f"border-radius: {shape['shape.radius_panel']:g}px;"
                 "padding: 8px 12px;"
                 f"background: {colors['bg.header']};"
@@ -378,8 +387,9 @@ class ToolPage(QWidget):
             place would mean walking the document per line, and a theme change
             is a deliberate act, not something that happens mid-read.
         """
-        self._level_colors = level_colors()
+        self._level_inks = level_inks()
         self._default_color = default_color()
+        self._timestamp_color = timestamp_color()
         self._apply_styles()
         self._rerender_console()
 
@@ -389,25 +399,12 @@ class ToolPage(QWidget):
         cursor = self._console.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         for record in self._log_records:
-            cursor.insertText(record.message + "\n", self._line_format(record.level))
+            insert_log_line(
+                cursor, record.level, record.message,
+                self._level_inks, self._default_color, self._timestamp_color,
+            )
         self._console.setTextCursor(cursor)
         self._console.ensureCursorVisible()
-
-    def _line_format(self, level: str) -> QTextCharFormat:
-        """Return the character format one log level is drawn in.
-
-        Args:
-            level: ``'stdout'`` or a logging level name.
-
-        Returns:
-            A format inked from the cached level colours. CRITICAL is also
-            bold: at that level the colour alone is doing too much work.
-        """
-        fmt = QTextCharFormat()
-        fmt.setForeground(QColor(self._level_colors.get(level, self._default_color)))
-        if level == "CRITICAL":
-            fmt.setFontWeight(700)
-        return fmt
 
     # ── Form assist ───────────────────────────────────────────────────────────
 
@@ -633,11 +630,12 @@ class ToolPage(QWidget):
         """
         self._log_records.append(LogEntry(level, message))
 
-        fmt = self._line_format(level)
-
         cursor = self._console.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
-        cursor.insertText(message + "\n", fmt)
+        insert_log_line(
+            cursor, level, message,
+            self._level_inks, self._default_color, self._timestamp_color,
+        )
         self._console.setTextCursor(cursor)
         self._console.ensureCursorVisible()
 

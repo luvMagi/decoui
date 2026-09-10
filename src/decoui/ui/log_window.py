@@ -1,6 +1,7 @@
 """Shared resizable log viewer window (used by HistoryPage and ToolPage)."""
 from __future__ import annotations
 
+import re
 from collections import namedtuple
 
 from PySide6.QtCore import Qt
@@ -23,38 +24,111 @@ LogEntry = namedtuple("LogEntry", ["level", "message"])
 
 _ALL_LEVELS = ["stdout", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
-#: Log level -> the theme colour token that paints it.
+#: Log level -> (tag token, body token). ``stdout`` has no tag: it is raw
+#: ``print()`` output, which arrives without the formatter's prefix.
 _LEVEL_TOKENS = {
-    "stdout":   "console.stdout",
-    "DEBUG":    "console.debug",
-    "INFO":     "console.info",
-    "WARNING":  "console.warning",
-    "ERROR":    "console.error",
-    "CRITICAL": "console.critical",
+    "stdout":   (None,                     "console.plain"),
+    "DEBUG":    ("console.tag.debug",      "console.body.debug"),
+    "INFO":     ("console.tag.info",       "console.body.info"),
+    "WARNING":  ("console.tag.warning",    "console.body.warning"),
+    "ERROR":    ("console.tag.error",      "console.body.error"),
+    "CRITICAL": ("console.tag.critical",   "console.body.critical"),
 }
 
+#: Splits a formatted line into (timestamp, level tag, message). It has to
+#: match what the worker's formatter writes -- ``"[%(asctime)s] %(levelname)-8s
+#: %(message)s"`` with ``"%H:%M:%S"`` (:mod:`decoui.engine.worker`). Lines are
+#: re-split at render time rather than stored in three pieces because history
+#: rows hold the whole line as one string, and a run reopened from the history
+#: table has to ink the same way as the run that produced it.
+#:
+#: DOTALL: a record's message can carry newlines -- a formatted traceback is
+#: one record -- and all of it belongs to the body.
+_LINE_RE = re.compile(r"^(\[\d\d:\d\d:\d\d\] )([A-Z]+ *)(.*)$", re.DOTALL)
 
-def level_colors() -> dict[str, str]:
-    """Return the foreground colour for each log level under the active theme.
 
-    Shared by the live console and this viewer, so a line keeps its colour when
-    it is reopened in the log window.
+def level_inks() -> dict[str, tuple[str | None, str]]:
+    """Return the tag and body colours for each level under the active theme.
+
+    Shared by the live console and this viewer, so a line keeps its colours
+    when it is reopened in the log window.
 
     Returns:
-        Level name to ``#rrggbb``. ``stdout`` reads apart from INFO on purpose:
-        raw ``print()`` output should not look like a logged message.
+        Level name to ``(tag colour, body colour)``, each ``#rrggbb``; the tag
+        colour is ``None`` for ``stdout``, which carries no tag. ``stdout``
+        reads apart from INFO on purpose: raw ``print()`` output should not
+        look like a logged message.
     """
     colors = active_theme().colors
-    return {level: colors[token] for level, token in _LEVEL_TOKENS.items()}
+    return {
+        level: (colors[tag] if tag else None, colors[body])
+        for level, (tag, body) in _LEVEL_TOKENS.items()
+    }
+
+
+def timestamp_color() -> str:
+    """Return the ink for the ``[HH:MM:SS]`` prefix under the active theme.
+
+    Returns:
+        A ``#rrggbb`` colour. Not per level: a clock reading is the same
+        information whatever the line's severity.
+    """
+    return active_theme().colors["console.timestamp"]
 
 
 def default_color() -> str:
     """Return the colour for a level the theme does not name.
 
     Returns:
-        The ``stdout`` colour, which is the theme's plain console foreground.
+        The plain console foreground, which is also what ``stdout`` uses.
     """
-    return active_theme().colors["console.stdout"]
+    return active_theme().colors["console.plain"]
+
+
+def insert_log_line(
+    cursor, level: str, message: str, inks, fallback: str, timestamp_ink: str
+) -> None:
+    """Insert one console line at the cursor, tag and body inked separately.
+
+    The single place a log line becomes text, so the live console and the log
+    window cannot drift apart on how a line is drawn.
+
+    A line whose shape :data:`_LINE_RE` does not recognise is written whole in
+    the body ink. That is not an edge case to be tidied away: the worker emits
+    an unformatted traceback on an unhandled exception, and stdout lines never
+    carry a prefix at all.
+
+    Args:
+        cursor: The text cursor to insert at, already positioned.
+        level: ``'stdout'`` or a logging level name.
+        message: The line, as it was emitted and as history stores it.
+        inks: The mapping from :func:`level_inks`.
+        fallback: Body colour for a level the theme does not name.
+        timestamp_ink: Colour for the ``[HH:MM:SS]`` prefix, from
+            :func:`timestamp_color`.
+    """
+    tag_color, body_color = inks.get(level, (None, fallback))
+    body = QTextCharFormat()
+    body.setForeground(QColor(body_color))
+    # At CRITICAL the colour is doing too much work on its own.
+    if level == "CRITICAL":
+        body.setFontWeight(700)
+
+    match = _LINE_RE.match(message) if tag_color else None
+    if match is None:
+        cursor.insertText(message + "\n", body)
+        return
+
+    timestamp, tag, rest = match.groups()
+    # Copied from `body` rather than built fresh, so CRITICAL's weight carries
+    # across all three spans and the line stays one visual unit.
+    stamp_fmt = QTextCharFormat(body)
+    stamp_fmt.setForeground(QColor(timestamp_ink))
+    tag_fmt = QTextCharFormat(body)
+    tag_fmt.setForeground(QColor(tag_color))
+    cursor.insertText(timestamp, stamp_fmt)
+    cursor.insertText(tag, tag_fmt)
+    cursor.insertText(rest + "\n", body)
 
 
 def console_style() -> str:
@@ -72,8 +146,9 @@ def console_style() -> str:
     colors, shape, font = theme.colors, theme.shape, theme.font
     return (
         f"background:{colors['bg.console']};"
-        f"color:{colors['console.stdout']};"
-        f"border:{shape['shape.border_width']:g}px solid {colors['border.console']};"
+        f"color:{colors['console.plain']};"
+        f"border:{shape['shape.border_width_control']:g}px "
+        f"{shape['shape.border_style_control']} {colors['border.console']};"
         f"border-radius:{shape['shape.radius_control']:g}px;"
         f"font-family: {', '.join(font.mono_family)};"
         f"font-size: {font.mono_size_pt:g}pt;"
@@ -203,18 +278,15 @@ class LogWindow(QMainWindow):
         self._console.clear()
         cursor = self._console.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
-        colors = level_colors()
+        inks = level_inks()
         fallback = default_color()
+        stamp = timestamp_color()
         for log in self._logs:
             if log.level not in self._active_levels:
                 continue
             if query and query not in log.message.lower():
                 continue
-            fmt = QTextCharFormat()
-            fmt.setForeground(QColor(colors.get(log.level, fallback)))
-            if log.level == "CRITICAL":
-                fmt.setFontWeight(700)
-            cursor.insertText(log.message + "\n", fmt)
+            insert_log_line(cursor, log.level, log.message, inks, fallback, stamp)
         self._console.setTextCursor(cursor)
 
     def _copy_all(self):

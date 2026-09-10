@@ -598,8 +598,8 @@ colour, a corner radius or a font.
 ```
 Theme
 ├── id / name          stable key + display name (see 9.5)
-├── colors   × 59      per part, not per application
-├── shape    ×  8      five radii, two border widths, one border style
+├── colors   × 69      per part, not per application
+├── shape    × 14      six radii, five border widths, three border styles
 └── font     ×  8      family, size, tracking, mono pair, title, small, caps
 ```
 
@@ -634,6 +634,9 @@ two halves must be able to move in opposite directions:
 | `text.on_success` / `on_danger` / `on_neutral` | a bright Run button needs dark text while Stop stays dark and needs light text |
 | `bg.topbar` + `text.on_topbar` | the top bar may be a dark band |
 | `bg.console` + `console.*` | the console is not necessarily dark |
+| `console.tag.*` vs `console.body.*` | a console is scanned by level, so the tag is the loud thing and the message stays readable underneath it |
+| `shape.border_style_panel` / `_control` / `_field` | a theme may bevel its buttons without bevelling its tables |
+| `running` vs `accent` | `accent` fills every checked button, so a theme that wants its toggles the same colour as its Run button would otherwise get a Running badge identical to the Done one |
 
 ### 9.3 Rendering
 
@@ -653,9 +656,11 @@ Two things QSS cannot express are handled through the font instead:
 - **Capitals.** Qt's stylesheet dialect has no `text-transform`, so
   `font.uppercase` is applied with `QFont.setCapitalization`. The widgets' text
   is never modified -- tab titles double as lookup keys.
-- **Bevels.** There are no gradients in this format, but `shape.border_style`
-  passes Qt's `outset` / `inset` / `ridge` / `groove` through, which draws a
-  raised or sunken edge from the border colour alone.
+- **Bevels.** There are no gradients in this format, but the
+  `shape.border_style_*` tokens pass Qt's `outset` / `inset` / `ridge` /
+  `groove` through, which draws a raised or sunken edge from the border
+  colour alone. `double` is accepted too, but Qt needs a width of at least 3
+  before it can fit two lines into the border it is given.
 
 ### 9.4 Applied at startup, and swapped in place
 
@@ -676,7 +681,7 @@ they need a shape or a colour the global rules cannot express:
 | `ToolPage` | Separator, title, description, console, small buttons | A frame used as a hairline; per-part sizes from the theme's typography |
 | `ToolPage` | The status badge | Its fill depends on the run's outcome, not on the theme alone |
 | `ToolPage` | The required-field asterisk | Rich text carries its own colour |
-| `ToolPage` / `LogWindow` | Lines already printed | A line's colour is a character format, written as the line arrived |
+| `ToolPage` / `LogWindow` | Lines already printed | A line's three inks are character formats, written as the line arrived |
 | `HelpWindow` | The whole page | `QTextBrowser` does not read the application stylesheet |
 
 Each of those declares `retheme()`, found by name rather than through a base

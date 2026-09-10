@@ -11,12 +11,13 @@ It changes **how existing widgets look**: colours, corner radii, border widths,
 font family and spacing. It cannot add, remove or rearrange widgets, and it
 cannot express gradients or bevels -- every colour token is one flat value.
 
-Two parts of the UI deliberately do **not** follow the theme:
+One part of the UI deliberately does **not** follow the theme:
 
-* The output console keeps its dark background and its per-level text colours
-  (see :mod:`decoui.ui.log_window`). It reads as a terminal in every theme.
 * Text casing. Qt's stylesheet dialect has no ``text-transform``, so a theme
   cannot upper-case labels; only the application's own strings decide that.
+
+The console does follow it -- background, frame and every log-level ink are
+tokens (see :mod:`decoui.ui.log_window`) -- so a light console is possible.
 
 Token names are a public contract
 ---------------------------------
@@ -112,6 +113,7 @@ COLOR_TOKENS: frozenset[str] = frozenset({
     # One ink per filled control. They are separate because the fills they sit
     # on are chosen independently: a theme may want a bright Run button that
     # needs dark text while its Stop button stays dark and needs light text.
+    "text.on_running",
     "text.on_success",
     "text.on_danger",
     "text.on_neutral",
@@ -133,6 +135,11 @@ COLOR_TOKENS: frozenset[str] = frozenset({
     "border.button_hover",
     "border.button_disabled",
     "border.tab",
+    "border.tab_selected",  # the cap drawn along the top of the current tab.
+                            # Its own token rather than `accent`: the cap is
+                            # the one place a theme marks "you are here" with a
+                            # line rather than a fill, and it is read against
+                            # the page it sits on, not against a control.
     "border.focus",        # the focused input's outline
     "border.console",      # the frame the console sits inside
     # ── Accent and semantics ─────────────────────────────────────────────────
@@ -146,19 +153,39 @@ COLOR_TOKENS: frozenset[str] = frozenset({
                            # basis -- cockpit does, and its check boxes came out
                            # near-black squares. This one is only ever seen on
                            # its own, so it has to read as "on" unaided.
-    "success", "success.hover",
+    "success", "success.hover",   # the Run button, and the badge a run ends on
+    # The badge while a run is in flight. Its own token rather than `accent`,
+    # which it used to borrow: `accent` also fills every checked button, so a
+    # theme that wanted its Run button and its toggles the same colour got a
+    # Running badge indistinguishable from the Done one it turns into.
+    "running",
     "danger", "danger.hover",
     "neutral",
     # ── Console log levels ───────────────────────────────────────────────────
-    # One per level the log viewer knows. They live in the theme so a light
-    # console is possible at all: the phosphor palette below only reads on a
-    # dark ground.
-    "console.stdout",
-    "console.debug",
-    "console.info",
-    "console.warning",
-    "console.error",
-    "console.critical",
+    # These live in the theme so a light console is possible at all: the
+    # phosphor palette the dark themes use only reads on a dark ground.
+    "console.plain",       # a line carrying no level: raw stdout, and anything
+                           # emitted without the formatter's prefix. Doubles as
+                           # the console widget's own foreground, so it is what
+                           # an unstyled character lands on.
+    "console.timestamp",   # the [12:03:44] prefix. One token, not one per
+                           # level: a clock reading carries no severity, and
+                           # five copies of the same grey is a worse thing to
+                           # ask a theme author to keep in step.
+    # Two inks per level, because the rest of a formatted line is two things:
+    #
+    #     [12:03:44] WARNING  disk almost full
+    #     └timestamp┘└─tag──┘└───── body ─────┘
+    #
+    # The tag is what the eye scans a console for, so it carries the loud
+    # colour, while the message keeps a quieter one that stays readable in
+    # bulk. A theme that wants the old whole-line tint sets a level's tag and
+    # body to the same value.
+    "console.tag.debug",    "console.body.debug",
+    "console.tag.info",     "console.body.info",
+    "console.tag.warning",  "console.body.warning",
+    "console.tag.error",    "console.body.error",
+    "console.tag.critical", "console.body.critical",
     # ── Scrollbars ───────────────────────────────────────────────────────────
     "scrollbar.handle",
     "scrollbar.handle_hover",
@@ -172,14 +199,47 @@ SHAPE_TOKENS: frozenset[str] = frozenset({
     # The console is a control, not a panel: it sits in the same column as the
     # buttons above it and is read as one framed element with them, so it
     # follows their radius rather than the table's.
-    "shape.radius_control",   # buttons, inputs, dropdowns, tabs, tree rows, console
+    # A button is the one control a theme is most likely to want a shape of its
+    # own for -- pill buttons over square fields, or the reverse -- and it is
+    # the only one whose corner is read as a deliberate style choice rather
+    # than as the edge of a box you type in.
+    "shape.radius_button",
+    "shape.radius_control",   # inputs, dropdowns, tabs, tree rows, console
     "shape.radius_panel",     # tables and the description box
     "shape.radius_pill",      # tag pills and status badges
-    "shape.border_width",
+    # Borders are grouped the way the colour tokens already are: the frame
+    # around a panel, the edge of a control, and the outline of an input are
+    # three different jobs, and a theme that bevels its buttons does not
+    # necessarily want a bevelled table. Width and style are named per group
+    # for that reason; the nine `border.*` colours stay finer-grained because
+    # they also carry hover and disabled states, which geometry does not.
+    "shape.border_width_panel",     # tag bar, sidebar, splitter, table, header
+    "shape.border_width_control",   # buttons, tabs, the console frame
+    "shape.border_width_field",     # inputs, dropdowns, the dropdown popup
+    # The lines that have to out-weigh the ordinary border beside them: a check
+    # indicator reads as a smudge at 1px, and the cap on the current tab has to
+    # look like a marker rather than like the tab's own edge. Not a group --
+    # one knob for the few places that mean "notice this".
     "shape.border_width_emphasis",
+    # The focused input's outline. Its own width because colour alone is not
+    # always enough to mark focus: on a low-contrast chassis the ring has to
+    # thicken to register. Setting it equal to `border_width_field` leaves
+    # focus a pure colour change, which is what most themes want -- see the
+    # note in the template about what a wider ring costs.
+    "shape.border_width_focus",
     # Qt draws outset/inset borders as a bevel from the border colour alone, so
     # a panel look is reachable without the gradients this format cannot carry.
-    "shape.border_style",
+    # `double` needs a width of at least 3 before Qt can fit two lines in it.
+    "shape.border_style_panel",
+    "shape.border_style_control",
+    "shape.border_style_field",
+})
+
+#: The shape tokens whose value is a style name rather than a number.
+STYLE_TOKENS: frozenset[str] = frozenset({
+    "shape.border_style_panel",
+    "shape.border_style_control",
+    "shape.border_style_field",
 })
 
 #: The border styles Qt renders. Anything else is refused rather than silently
@@ -386,7 +446,7 @@ def _check_shape(values: dict[str, Any], source: str) -> dict[str, float]:
     """
     result: dict[str, float] = {}
     for token, value in values.items():
-        if token == "border_style" or token.endswith(".border_style"):
+        if token in STYLE_TOKENS:
             if value not in BORDER_STYLES:
                 raise ThemeError(
                     f"{source}: shape['{token}'] must be one of "
@@ -991,12 +1051,12 @@ QStackedWidget > QWidget {
 QWidget#tagBar {
     background-color: $bg_topbar;
     color: $text_on_topbar;
-    border-bottom: $shape_border_width solid $border_panel;
+    border-bottom: $shape_border_width_panel $shape_border_style_panel $border_panel;
 }
 /* Sidebar */
 QWidget#sidebar {
     background-color: $bg_sidebar;
-    border-right: $shape_border_width solid $border_subtle;
+    border-right: $shape_border_width_panel $shape_border_style_panel $border_subtle;
 }
 QWidget#sidebar QLineEdit {
     background-color: $bg_field;
@@ -1023,7 +1083,7 @@ QTreeWidget::item:selected {
 /* Splitter */
 QSplitter::handle:horizontal {
     background-color: $bg_app;
-    border-left: $shape_border_width solid $border_subtle;
+    border-left: $shape_border_width_panel $shape_border_style_panel $border_subtle;
 }
 QSplitter::handle:horizontal:hover {
     background-color: $accent_soft;
@@ -1038,7 +1098,7 @@ QTabWidget::pane {
    page is therefore drawn by the page itself -- see ToolPage._build_ui. */
 QTabBar::tab {
     background-color: $bg_tab;
-    border: $shape_border_width $shape_border_style $border_tab;
+    border: $shape_border_width_control $shape_border_style_control $border_tab;
     border-bottom: none;
     border-top-left-radius: $shape_radius_control;
     border-top-right-radius: $shape_radius_control;
@@ -1048,6 +1108,11 @@ QTabBar::tab {
 QTabBar::tab:selected {
     background-color: $bg_tab_selected;
     color: $text_tab_selected;
+    font-weight: bold;
+    /* Wider than the tab's own border, so the cap reads as a marker rather
+       than as an edge. The extra pixel comes out of the tab's content box --
+       see the note on the focus ring, which pays the same cost. */
+    border-top: $shape_border_width_emphasis $shape_border_style_control $border_tab_selected;
 }
 /* Close affordance installed by MainWindow; Qt's built-in one is unusable here
    because styling QTabBar::tab stops it being painted on the selected tab and
@@ -1066,8 +1131,8 @@ QToolButton#tabCloseButton:pressed {
 /* Buttons */
 QPushButton {
     background-color: $bg_button;
-    border: $shape_border_width $shape_border_style $border_button;
-    border-radius: $shape_radius_control;
+    border: $shape_border_width_control $shape_border_style_control $border_button;
+    border-radius: $shape_radius_button;
     padding: 4px 14px;
     color: $text_button;
     min-height: 26px;
@@ -1111,32 +1176,41 @@ QPushButton#stop_btn:hover {
 /* Inputs */
 QLineEdit {
     background-color: $bg_field;
-    border: $shape_border_width solid $border_field;
+    border: $shape_border_width_field $shape_border_style_field $border_field;
     border-radius: $shape_radius_control;
     padding: 4px 8px;
     min-height: 24px;
 }
+/* A focus ring wider than the field's own border adds to the widget's size
+   hint -- 2px of hint per 1px of ring, measured. Whether that shows as the
+   field nudging taller on focus or as its content box tightening depends on
+   what the surrounding layout is free to do. One pixel is not worth a second
+   set of paddings to cancel; a theme that objects sets this equal to
+   `shape.border_width_field` and marks focus by colour alone. */
 QLineEdit:focus {
     border-color: $border_focus;
+    border-width: $shape_border_width_focus;
 }
 QTextEdit {
     background-color: $bg_field;
-    border: $shape_border_width solid $border_field;
+    border: $shape_border_width_field $shape_border_style_field $border_field;
     border-radius: $shape_radius_control;
     padding: 4px 8px;
 }
 QTextEdit:focus {
     border-color: $border_focus;
+    border-width: $shape_border_width_focus;
 }
 QSpinBox, QDoubleSpinBox {
     background-color: $bg_field;
-    border: $shape_border_width solid $border_field;
+    border: $shape_border_width_field $shape_border_style_field $border_field;
     border-radius: $shape_radius_control;
     padding: 3px 8px 3px 8px;
     min-height: 26px;
 }
 QSpinBox:focus, QDoubleSpinBox:focus {
     border-color: $border_focus;
+    border-width: $shape_border_width_focus;
 }
 QSpinBox::up-button, QDoubleSpinBox::up-button,
 QSpinBox::down-button, QDoubleSpinBox::down-button {
@@ -1146,13 +1220,14 @@ QSpinBox::down-button, QDoubleSpinBox::down-button {
 }
 QComboBox {
     background-color: $bg_field;
-    border: $shape_border_width solid $border_field;
+    border: $shape_border_width_field $shape_border_style_field $border_field;
     border-radius: $shape_radius_control;
     padding: 3px 8px;
     min-height: 26px;
 }
 QComboBox:focus {
     border-color: $border_focus;
+    border-width: $shape_border_width_focus;
 }
 QComboBox::drop-down {
     border: none;
@@ -1160,7 +1235,7 @@ QComboBox::drop-down {
 }
 QComboBox QAbstractItemView {
     background-color: $bg_field;
-    border: $shape_border_width solid $border_field;
+    border: $shape_border_width_field $shape_border_style_field $border_field;
     selection-background-color: $accent_soft;
     selection-color: $text_primary;
     outline: none;
@@ -1172,7 +1247,7 @@ QCheckBox {
 QCheckBox::indicator {
     width: 16px;
     height: 16px;
-    border: $shape_border_width_emphasis solid $border_field;
+    border: $shape_border_width_emphasis $shape_border_style_field $border_field;
     border-radius: $shape_radius_small;
     background: $bg_field;
 }
@@ -1193,7 +1268,7 @@ QProgressBar::chunk {
 /* Table */
 QTableWidget {
     background-color: $bg_table;
-    border: $shape_border_width solid $border_subtle;
+    border: $shape_border_width_panel $shape_border_style_panel $border_subtle;
     border-radius: $shape_radius_panel;
     gridline-color: $bg_gridline;
     outline: none;
@@ -1201,7 +1276,7 @@ QTableWidget {
 QHeaderView::section {
     background-color: $bg_header;
     border: none;
-    border-bottom: $shape_border_width solid $border_subtle;
+    border-bottom: $shape_border_width_panel $shape_border_style_panel $border_subtle;
     padding: 6px 8px;
     font-weight: bold;
     color: $text_muted;
@@ -1221,7 +1296,7 @@ QTableWidget::item:selected {
 QTableWidget::indicator {
     width: 16px;
     height: 16px;
-    border: $shape_border_width_emphasis solid $border_field;
+    border: $shape_border_width_emphasis $shape_border_style_field $border_field;
     border-radius: $shape_radius_small;
     background: $bg_field;
 }
