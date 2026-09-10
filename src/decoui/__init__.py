@@ -43,6 +43,12 @@ Rules that are easy to get wrong
    JSON, but the GUI shows nothing. Use ``print()`` or ``logging`` for output the
    user must see.
 
+   To carry something *forward* instead -- the environment last deployed to, the
+   folder last exported into -- use :func:`decoui.store`, which persists it in
+   the same database::
+
+       store("deploy")["last_env"] = env
+
 5. **Cancellation cannot interrupt a blocking call.** If a tool starts a
    subprocess, it must declare ``@tool(on_cancel=...)`` or pressing Stop will
    leave the child running. See :mod:`decoui.engine.worker` for why.
@@ -58,6 +64,7 @@ Where to read further
 :mod:`decoui.runner`          ``gui_main`` and the startup order
 :mod:`decoui.engine.worker`   threading, output capture, cancellation, progress
 :mod:`decoui.assist`          completions / cascade / defaults callback rules
+:mod:`decoui.storage.store`   ``store()``: remembering something between runs
 :mod:`decoui.storage.models`  what a run records
 ============================  ==============================================
 """
@@ -65,6 +72,7 @@ Where to read further
 from .decorators import tool, toolset
 from .engine.worker import progress
 from .runner import gui_main
+from .storage.store import Store, store
 from .types import Choice, DirPath, F, FilePath, Text
 
 __all__ = [
@@ -72,6 +80,8 @@ __all__ = [
     "tool",
     "gui_main",
     "progress",
+    "store",
+    "Store",
     "F",
     "Text",
     "FilePath",

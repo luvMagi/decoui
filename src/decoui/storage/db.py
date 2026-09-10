@@ -169,6 +169,44 @@ def set_setting(key: str, value: str) -> None:
         )
 
 
+def delete_setting(key: str) -> None:
+    """Remove a persisted setting, if it is there.
+
+    Args:
+        key: The setting to drop. Deleting a key that was never written is not
+            an error: the caller wanted it gone, and it is.
+    """
+    with _conn() as con:
+        con.execute("DELETE FROM app_setting WHERE key = ?", (key,))
+
+
+def settings_with_prefix(prefix: str) -> list[tuple[str, str]]:
+    """Return every setting whose key starts with a prefix.
+
+    Args:
+        prefix: The literal prefix to match. ``%`` and ``_`` in it are escaped,
+            so a prefix is never read as a LIKE pattern.
+
+    Returns:
+        ``(key, value)`` pairs, sorted by key. The keys are full keys, prefix
+        included -- trimming them is the caller's business, since only the
+        caller knows what it prefixed with.
+
+    Note:
+        ``key`` is the table's primary key, so this is an index range scan
+        rather than a table scan. That is what lets a namespace live in the key
+        instead of needing a column of its own.
+    """
+    pattern = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT key, value FROM app_setting "
+            "WHERE key LIKE ? ESCAPE '\\' ORDER BY key",
+            (pattern,),
+        ).fetchall()
+    return [(str(k), str(v)) for k, v in rows]
+
+
 def insert_record(rec: ExecutionRecord) -> int:
     """Insert a run and its parameter snapshot, returning the new id.
 

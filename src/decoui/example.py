@@ -51,7 +51,7 @@ import sys
 import time
 
 from decoui import progress, tool, toolset
-from decoui.storage.db import get_setting, set_setting
+from decoui import store
 
 
 # ── Shared enums ──────────────────────────────────────────────────────────────
@@ -737,7 +737,7 @@ class AssistTools:
           * this blocks the window from appearing, so keep it quick
           * the event loop is not running, so no timers and no worker threads
         """
-        stored = get_setting("example.deploy.env")
+        stored = store("example").get("deploy_env")
         if stored:
             self.preferences["env"] = stored
 
@@ -791,7 +791,9 @@ class AssistTools:
         if dry_run:
             logging.warning("dry_run is on — nothing was actually deployed.")
         # Remember the choice; on_startup() reads it back on the next launch.
-        set_setting("example.deploy.env", env)
+        # store() is the public way to persist a preference -- it namespaces the
+        # key, so nothing here can reach decoui's own settings.
+        store("example")["deploy_env"] = env
         return f"{service} {version} → {env}"
 
     def search_services(self, text: str) -> list[str]:
