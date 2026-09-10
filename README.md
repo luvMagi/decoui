@@ -544,14 +544,15 @@ new theme appears the next time the application starts.
 
 The token groups:
 
-| Group | Covers |
-|---|---|
-| `bg.*` | every surface separately -- app, page, top bar, tabs, sidebar, tool list, fields, buttons, table, console |
-| `text.*` | including `text.on_sidebar`, which is what lets the tool list sit on a dark panel |
-| `border.*` | panels, fields, buttons, tabs, focus, and the console's frame |
-| `console.*` | one colour per log level, so a light console is possible at all |
-| `shape.*` | five corner radii and two border widths; set the radii to `0` to square everything off |
-| `font.*` | `family` / `size_pt` / `letter_spacing`, plus `mono_family` and `mono_size_pt` for the console and `title_size_px` / `small_size_pt` for headings and secondary controls |
+| Group | Count | Covers |
+|---|---|---|
+| `bg.*` | 21 | every surface separately -- app, page, top bar, tabs, sidebar, tool list, fields, buttons, table, console |
+| `text.*` | 14 | one ink per place text sits, including `text.on_sidebar` (a dark tool list), `text.on_topbar` (a dark top bar), and `text.on_success` / `on_danger` / `on_neutral` so a bright Run button can take dark text while Stop stays dark and takes light text |
+| `border.*` | 9 | panels, fields, buttons, tabs, focus, and the console's frame |
+| `console.*` | 6 | one colour per log level, so a light console is possible at all |
+| `accent` · `success` · `danger` · `neutral` · `scrollbar.*` | 9 | selections and the semantic fills |
+| `shape.*` | 8 | five corner radii, two border widths, and `border_style` -- Qt's `outset` / `inset` / `ridge` / `groove` draw a bevel from the border colour, which is as close to a raised panel as a flat format gets. Set the radii to `0` to square everything off. |
+| `font.*` | 8 | `family` / `size_pt` / `letter_spacing`, `mono_family` / `mono_size_pt` for the console, `title_size_px` / `small_size_pt` for headings and secondary controls, and `uppercase` to render tags, tabs and buttons in capitals |
 
 Font families are **stacks**: Qt falls through them in order, so end every one with
 a generic family (`monospace`, `sans-serif`) or the theme lands on Qt's default
@@ -566,6 +567,8 @@ wherever its preferred face is missing.
 * Colours are `#rrggbb` only. There are no gradients: every token is one flat
   colour, so metallic and bevelled looks are out of reach.
 * Setting the `shape.radius_*` tokens to `0` squares the whole interface off.
+* `font.uppercase` changes only how labels are drawn -- the underlying strings
+  are untouched, so a tab's title still matches its tool id.
 
 Run `python -c "import decoui.theme as t; print(sorted(t.COLOR_TOKENS))"` for
 the full token list.
