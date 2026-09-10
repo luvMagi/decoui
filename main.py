@@ -18,7 +18,7 @@ dynamically, or when a plugin package registers its own.
 import logging
 
 from decoui import gui_main
-from decoui.example import AssistTools, DemoTools, NumberTools, TextTools
+from decoui.example import AssistTools, DemoTools, FontTools, NumberTools, TextTools
 
 if __name__ == "__main__":
     # DEBUG, not INFO: decoui attaches its console handler to the root logger
@@ -33,5 +33,5 @@ if __name__ == "__main__":
         db_path="history.db",
         # The list decides *what* loads, not the order it appears in: the
         # sidebar is always sorted by label.
-        toolsets=[TextTools, NumberTools, DemoTools, AssistTools],
+        toolsets=[TextTools, NumberTools, DemoTools, AssistTools, FontTools],
     )

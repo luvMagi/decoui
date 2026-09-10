@@ -23,7 +23,8 @@ from decoui import tool, toolset
 from decoui.guide import guide_pages
 from decoui.registry import build_tree
 from decoui.theme import builtin_themes, set_active_theme
-from decoui.ui.help_window import _HELP_ROLE, LINK_SCHEME, HelpWindow, _inline
+from decoui.markup import LINK_SCHEME, inline
+from decoui.ui.help_window import _HELP_ROLE, HelpWindow
 from decoui.ui.retheme import retheme_application
 
 
@@ -87,8 +88,16 @@ def _titles(window: HelpWindow) -> list[str]:
 # ── Writing a reference ───────────────────────────────────────────────────────
 
 def test_a_reference_to_a_known_page_becomes_a_link() -> None:
-    """Verify ``[text](key)`` renders as an anchor under decoui's own scheme."""
-    rendered = _inline("see [Themes](guide.themes)", frozenset({"guide.themes"}))
+    """Verify ``[[key]]`` renders as an anchor under decoui's own scheme."""
+    rendered = inline("see [[guide.themes]]", frozenset({"guide.themes"}))
+
+    assert f'href="{LINK_SCHEME}:guide.themes"' in rendered
+    assert ">guide.themes</a>" in rendered
+
+
+def test_a_reference_may_be_given_its_own_text() -> None:
+    """Verify ``[[key|label]]`` shows the label and links the key."""
+    rendered = inline("see [[guide.themes|Themes]]", frozenset({"guide.themes"}))
 
     assert f'href="{LINK_SCHEME}:guide.themes"' in rendered
     assert ">Themes</a>" in rendered
@@ -101,7 +110,7 @@ def test_a_reference_to_an_unknown_page_stays_prose() -> None:
     cannot be written against a fixed set. A link that goes nowhere is worse
     than the sentence without it.
     """
-    rendered = _inline("see [Gone](no.such.key)", frozenset({"guide.themes"}))
+    rendered = inline("see [[no.such.key|Gone]]", frozenset({"guide.themes"}))
 
     assert rendered == "see Gone"
     assert "<a" not in rendered
@@ -109,7 +118,7 @@ def test_a_reference_to_an_unknown_page_stays_prose() -> None:
 
 def test_a_reference_may_carry_markup_of_its_own() -> None:
     """Verify the link text goes through the same inline pass."""
-    rendered = _inline("[**loud**](guide.themes)", frozenset({"guide.themes"}))
+    rendered = inline("[[guide.themes|**loud**]]", frozenset({"guide.themes"}))
 
     assert "<b>loud</b></a>" in rendered
 

@@ -23,12 +23,16 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QApplication, QWidget
 
+from ..storage.db import get_setting
 from ..theme import (
+    FONT_FAMILY_SETTING,
     Theme,
     apply_label_case,
+    parse_font_family,
     render_stylesheet,
     set_active_theme,
     theme_font,
+    with_font_family,
 )
 
 
@@ -36,14 +40,21 @@ def retheme_application(theme: Theme) -> None:
     """Make ``theme`` the live theme and repaint everything already on screen.
 
     Args:
-        theme: The theme to switch to. It becomes the one
+        theme: The theme to switch to, before the user's font override is laid
+            over it. The result becomes the one
             :func:`decoui.theme.active_theme` returns, so widgets built after
             this call are born under it.
 
     Note:
         Safe to call with no QApplication running: the active theme is still
         recorded, which is all a test or a headless caller can observe.
+
+    Note:
+        The font override is re-read here rather than passed in, which is what
+        lets the settings dialog hand over the theme it was offering and still
+        have a font the user changed in the same visit take effect.
     """
+    theme = with_font_family(theme, parse_font_family(get_setting(FONT_FAMILY_SETTING)))
     set_active_theme(theme)
 
     app = QApplication.instance()

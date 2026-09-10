@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <!-- A question mark drawn as geometry rather than set as type, so it is the
+       same weight and the same ink as the gear beside it. The hook is a 225
+       degree arc on a circle of r=3.9 about (12,8.4), running from the left of
+       that circle clockwise over the top and down to its lower right; the stem
+       curves back to the centre line, and the dot is a separate subpath.
+       "currentColor" is a placeholder: ui/tag_bar.py substitutes the active
+       theme's button text colour before handing the source to QSvgRenderer. -->
+  <g fill="none" stroke="currentColor" stroke-width="2.8"
+     stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8.1 8.4 A3.9 3.9 0 1 1 14.76 11.16 Q12 13.2 12 15.8"/>
+    <path d="M12 20.2 L12 20.2"/>
+  </g>
+</svg>

@@ -19,8 +19,8 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    # Essentials only: decoui imports QtCore, QtGui, QtWidgets and QtTest, all of
-    # which live here. The full PySide6 metapackage additionally pulls
+    # Essentials only: decoui imports QtCore, QtGui, QtWidgets, QtSvg and
+    # QtTest, all of which live here. The full PySide6 metapackage pulls
     # PySide6-Addons (Charts, Multimedia, WebEngine, Qt3D, ...), which triples
     # the install for modules decoui never touches. Tools that need an Addons
     # module can depend on PySide6 or PySide6-Addons themselves.
@@ -52,7 +52,6 @@ packages = ["src/decoui"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "src/decoui/icon.png" = "decoui/icon.png"
-"src/decoui/tab_close.svg" = "decoui/tab_close.svg"
 
 [dependency-groups]
 dev = [

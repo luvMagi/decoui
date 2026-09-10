@@ -46,6 +46,7 @@ from ..widget_builder import (
     get_value,
     set_value,
 )
+from .icons import theme_icon
 from .log_window import LogEntry, LogWindow, console_style, default_color, level_colors
 
 #: Status badge -> the theme colour token that inks it.
@@ -269,6 +270,9 @@ class ToolPage(QWidget):
         self._run_btn.clicked.connect(self._on_run)
         self._reset_btn = QPushButton(t("tool.reset"), self)
         self._reset_btn.clicked.connect(self._reset_params)
+        self._reset_btn.setIcon(
+            theme_icon("reset", ratio=self.devicePixelRatioF())
+        )
         self._stop_btn = QPushButton(t("tool.stop"), self)
         self._stop_btn.setObjectName("stop_btn")
         self._stop_btn.setVisible(False)
@@ -343,6 +347,9 @@ class ToolPage(QWidget):
         )
         self._copy_btn.setStyleSheet(_small_button_style(theme))
         self._expand_btn.setStyleSheet(_small_button_style(theme))
+        # Redrawn rather than restyled: an icon is a pixmap, and no stylesheet
+        # reaches inside one.
+        self._reset_btn.setIcon(theme_icon("reset", ratio=self.devicePixelRatioF()))
         self._console.setStyleSheet(console_style())
 
         # Labels may come from user metadata, so they are escaped before going

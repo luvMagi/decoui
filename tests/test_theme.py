@@ -89,6 +89,26 @@ _TAB_SEPARATOR = {
     ("+", "   page is therefore drawn by the page itself -- see ToolPage._build_ui. */"),
 }
 
+#: The history table's check column is styled rather than left to the platform,
+#: which drew a bare tick with no box -- nothing like the QCheckBox the same
+#: application puts in every form. The rules are copied from the QCheckBox
+#: indicator so the two agree.
+_TABLE_CHECK_INDICATOR = {
+    ("+", "/* The check column in the history table. Left to the platform style it is a"),
+    ("+", "   bare tick drawn in the text colour -- no box, no fill, and nothing like the"),
+    ("+", "   QCheckBox a form puts three inches away. These rules are the same ones the"),
+    ("+", "   QCheckBox indicator gets, so a check mark means the same thing to the eye"),
+    ("+", "   wherever it appears. */"),
+    ("+", "QTableWidget::indicator {"),
+    ("+", "    width: 16px;"),
+    ("+", "    height: 16px;"),
+    ("+", "    border: 1.5px solid #d0d5e0;"),
+    ("+", "    background: #ffffff;"),
+    ("+", "QTableWidget::indicator:checked {"),
+    ("+", "    background-color: #3b5bdb;"),
+    ("+", "    border-color: #3b5bdb;"),
+}
+
 #: Everything the current light theme may differ from the pre-theme stylesheet
 #: by. Anything else is drift and fails the test.
 EXPECTED_STYLESHEET_DIFF = (
@@ -98,6 +118,7 @@ EXPECTED_STYLESHEET_DIFF = (
     | _SIDEBAR_TEXT
     | _TAB_SEPARATOR
     | _TYPOGRAPHY
+    | _TABLE_CHECK_INDICATOR
 )
 
 

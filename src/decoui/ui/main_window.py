@@ -31,19 +31,16 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..assets import tab_close_icon_path
+from ..assets import icon_path
 from ..registry import ToolInfo, ToolSetInfo
-from ..storage.db import get_setting, set_setting
 from .history_page import HistoryPage
 from .nav_tree import NavTree
 from ..i18n import t
 from ..theme import apply_label_case
 from .settings_dialog import SettingsDialog
+from .sidebar_width import save_sidebar_width, stored_sidebar_width
 from .tag_bar import TagBar
 from .tool_page import ToolPage
-
-_SIDEBAR_WIDTH_SETTING = "ui.sidebar.width"
-_DEFAULT_SIDEBAR_WIDTH = 220
 
 _CLOSE_BUTTON_SIZE = 16
 _CLOSE_ICON_SIZE = 10
@@ -72,7 +69,10 @@ class MainWindow(QMainWindow):
         """
         super().__init__()
         self.setWindowTitle(t("app.window_title", title=title))
-        self.resize(1100, 700)
+        # The same width the help window opens at, so that the two sit side by
+        # side without either being the odd one out. A tool page's form and
+        # console want the room for the same reason a help page's tables do.
+        self.resize(1180, 700)
 
         self._tree = tree
         self._tool_pages: dict[str, ToolPage] = {}
@@ -267,7 +267,7 @@ class MainWindow(QMainWindow):
 
         button = QToolButton(holder)
         button.setObjectName("tabCloseButton")
-        button.setIcon(QIcon(str(tab_close_icon_path())))
+        button.setIcon(QIcon(str(icon_path("tab-close"))))
         button.setIconSize(QSize(_CLOSE_ICON_SIZE, _CLOSE_ICON_SIZE))
         button.setFixedSize(_CLOSE_BUTTON_SIZE, _CLOSE_BUTTON_SIZE)
         button.setToolTip(t("tabs.close"))
@@ -387,16 +387,7 @@ class MainWindow(QMainWindow):
 
     def _restore_sidebar_width(self) -> None:
         """Restore the sidebar width from application settings."""
-        stored_width = get_setting(_SIDEBAR_WIDTH_SETTING)
-        try:
-            sidebar_width = (
-                int(stored_width)
-                if stored_width is not None
-                else _DEFAULT_SIDEBAR_WIDTH
-            )
-        except ValueError:
-            sidebar_width = _DEFAULT_SIDEBAR_WIDTH
-        sidebar_width = max(0, sidebar_width)
+        sidebar_width = stored_sidebar_width()
         content_width = max(1, self.width() - sidebar_width)
         self._splitter.setSizes([sidebar_width, content_width])
 
@@ -408,7 +399,7 @@ class MainWindow(QMainWindow):
         """Persist the current sidebar width in the application database."""
         sizes = self._splitter.sizes()
         if sizes:
-            set_setting(_SIDEBAR_WIDTH_SETTING, str(sizes[0]))
+            save_sidebar_width(sizes[0])
 
     def closeEvent(self, event: QCloseEvent) -> None:
         """Flush pending layout settings before the main window closes."""

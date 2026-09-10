@@ -12,6 +12,11 @@ dependency instead of pulling in a general docstring library.
 The parser is deliberately forgiving: an unparseable docstring degrades to
 "summary only" rather than raising. Help is presentation, and no tool should
 become unusable because its prose is shaped oddly.
+
+A tool may also point at a Markdown file -- ``@tool(help="deploy.md")`` -- when
+its help outgrows a docstring or wants translating. The file supplies the prose
+and nothing else; see :func:`resolve_help_file` for where it is looked for and
+:func:`build_tool_help` for what it does and does not replace.
 """
 from __future__ import annotations
 
@@ -19,10 +24,11 @@ import enum
 import inspect
 import pathlib
 import re
+import sys
 from dataclasses import dataclass, field
 from typing import Any
 
-from .i18n import t
+from .i18n import DEFAULT_LANGUAGE, active_language, t
 
 #: Section headers recognised at the top level of a Google-style docstring.
 #: ``Args`` and ``Parameters`` are both accepted because the second is common
@@ -283,18 +289,122 @@ class ToolSetHelp:
     tools: list[ToolHelp]
 
 
-def build_tool_help(tool_info: Any) -> ToolHelp:
+def resolve_help_file(
+    cls: type, name: str, language: str | None = None
+) -> pathlib.Path | None:
+    """Find the Markdown file a ``@tool(help=...)`` names.
+
+    The search is rooted at the directory of the module ``cls`` is defined in,
+    not at the working directory or at any configured path: help ships with the
+    code it documents, and an application installed as a wheel has no other
+    stable place to have put it.
+
+    ``name`` is a relative path, and decoui's only contribution to it is to
+    insert a language directory before the file. For ``help="doc/deploy.md"``,
+    three locations are tried in this order::
+
+        <module_dir>/doc/<language>/deploy.md
+        <module_dir>/doc/<DEFAULT_LANGUAGE>/deploy.md
+        <module_dir>/doc/deploy.md
+
+    The first two are the same per-language fallback
+    :func:`decoui.guide.guide_pages` uses, so translating a tool's help works
+    the way translating decoui's own pages does. The third is for an application
+    that has help but only one language, which should not have to make an ``en``
+    directory to say so.
+
+    The directory is the author's to name rather than fixed at ``help/``,
+    because a fixed name is one an application may already have taken -- decoui
+    itself could not use its own convention, having a :mod:`decoui.help` module
+    sitting exactly where the directory would go.
+
+    Args:
+        cls: The toolset class, whose module locates the search.
+        name: The relative path as written in the decorator. It is confined to
+            the module's directory: a name that climbs out of it with ``..``,
+            or that is absolute, is refused rather than followed.
+        language: Language code, or None to follow the running language.
+
+    Returns:
+        The first path that exists, or None. Missing is not an error: the
+        docstring is still there, and a help page that quietly falls back is a
+        better failure than an application that will not start.
+    """
+    module = sys.modules.get(cls.__module__)
+    origin = getattr(module, "__file__", None)
+    if origin is None:
+        return None
+
+    root = pathlib.Path(origin).resolve().parent
+    relative = pathlib.PurePosixPath(name.replace("\\", "/"))
+    if relative.is_absolute() or ".." in relative.parts:
+        return None
+
+    parent, filename = relative.parent, relative.name
+    wanted = language or active_language()
+    candidates = (
+        root / parent / wanted / filename,
+        root / parent / DEFAULT_LANGUAGE / filename,
+        root / parent / filename,
+    )
+    for candidate in candidates:
+        # Resolved before the containment check: a symlink pointing out of the
+        # tree is the same escape as "..", just spelled differently.
+        resolved = candidate.resolve()
+        if resolved.is_file() and resolved.is_relative_to(root):
+            return resolved
+    return None
+
+
+def _help_file_text(cls: type, name: str) -> str:
+    """Read a tool's help file, or return nothing when it cannot be read.
+
+    Args:
+        cls: The toolset class the file is looked up beside.
+        name: The file name from the decorator.
+
+    Returns:
+        The file's text, or ``""`` when there is no such file or it cannot be
+        decoded. Both are reported the same way on purpose -- this runs while
+        the help panel is being built, where the only useful behaviour is to
+        fall back to the docstring.
+    """
+    path = resolve_help_file(cls, name)
+    if path is None:
+        return ""
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError):
+        return ""
+
+
+def build_tool_help(tool_info: Any, cls: type | None = None) -> ToolHelp:
     """Collect one tool's help from its docstring and declaration.
 
     Args:
         tool_info: A ToolInfo from the registry.
+        cls: The toolset class the tool is defined on, needed to locate a
+            ``help=`` file. None skips the file lookup, which is what a caller
+            with only a ToolInfo in hand can do.
 
     Returns:
         The assembled help. A tool with no docstring still produces a usable
         entry: the summary falls back to ``@tool(description=)`` and the
         parameter table is built from the signature alone.
+
+    Note:
+        A ``help=`` file replaces ``description`` -- the prose -- and nothing
+        else. The summary stays the docstring's first line because it is also
+        the tool's one-line entry in the contents table, and the parameter,
+        Returns and Raises sections stay the docstring's because they describe
+        the signature: a file sitting beside the module cannot be checked
+        against the code, and help that silently disagrees with the form on
+        screen is worse than help that is merely brief.
     """
     parsed = parse_docstring(getattr(tool_info.method, "__doc__", None))
+    description = parsed.description
+    if cls is not None and getattr(tool_info, "help", None):
+        description = _help_file_text(cls, tool_info.help) or description
     params = [
         ParamHelp(
             name=param.name,
@@ -310,7 +420,7 @@ def build_tool_help(tool_info: Any) -> ToolHelp:
         tool_id=tool_info.tool_id,
         label=tool_info.label,
         summary=parsed.summary or tool_info.description,
-        description=parsed.description,
+        description=description,
         params=params,
         returns=parsed.returns,
         raises=parsed.raises,
@@ -335,6 +445,9 @@ def build_help(tree: list) -> list[ToolSetHelp]:
             label=toolset_info.label,
             summary=parsed.summary,
             description=parsed.description,
-            tools=[build_tool_help(t) for t in toolset_info.tools],
+            tools=[
+                build_tool_help(t, toolset_info.cls)
+                for t in toolset_info.tools
+            ],
         ))
     return result

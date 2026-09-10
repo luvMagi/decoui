@@ -87,8 +87,8 @@ def test_example_tree_builds() -> None:
     ]
     tree = build_tree(*classes)
 
-    assert len(tree) == 4
-    assert sum(len(ts.tools) for ts in tree) == 15
+    assert len(tree) == 5
+    assert sum(len(ts.tools) for ts in tree) == 17
 
 
 def test_slow_task_reports_progress(recorder: _Recorder) -> None:

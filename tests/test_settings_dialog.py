@@ -88,11 +88,21 @@ def test_settings_button_is_reachable_without_any_tags(qt_app: QApplication) -> 
     bar.close()
 
 
-def test_settings_button_carries_no_inline_style(qt_app: QApplication) -> None:
-    """Verify the button inherits the theme instead of hard-coding a look."""
+def test_settings_button_hard_codes_no_colour(qt_app: QApplication) -> None:
+    """Verify the button takes its colours from the theme, not from itself.
+
+    It does carry a stylesheet: the application's generic QPushButton rule
+    spends 14px of padding either side, which is right for a word and leaves an
+    18px icon nothing, so the button asks for none. What it must never do is
+    name a colour -- that would be a second copy to keep in step with every
+    theme, and the one that got forgotten.
+    """
     bar = TagBar(["one"])
 
-    assert bar._settings_btn.styleSheet() == ""
+    sheet = bar._settings_btn.styleSheet()
+
+    assert "#" not in sheet, f"a colour literal leaked into the button: {sheet!r}"
+    assert "color" not in sheet, f"the button names a colour: {sheet!r}"
 
     bar.close()
 

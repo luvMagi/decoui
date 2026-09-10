@@ -27,14 +27,17 @@ from .decorators import _TOOL_ATTR, _TOOLSET_ATTR
 from .i18n import LANGUAGE_SETTING, set_language, t
 from .theme import (
     DEFAULT_THEME_ID,
+    FONT_FAMILY_SETTING,
     THEME_SETTING,
     Theme,
     discover_themes,
+    parse_font_family,
     render_stylesheet,
     resolve_theme,
     set_active_theme,
     set_active_theme_dir,
     theme_font,
+    with_font_family,
 )
 from .registry import build_tree
 from .storage.db import get_setting, init_db, set_db_path
@@ -423,8 +426,15 @@ def _apply_theme(app, theme: Theme) -> None:
 
     Args:
         app: The QApplication to configure.
-        theme: The theme to apply.
+        theme: The theme to apply, before the user's font override is laid over
+            it.
     """
+    # Applied here rather than where the theme was resolved, so that one Theme
+    # object -- the overridden one -- is what the stylesheet, the application
+    # font and every widget that reads active_theme() all see. Overriding after
+    # any of those had already been handed the original would leave the window
+    # in two fonts at once.
+    theme = with_font_family(theme, parse_font_family(get_setting(FONT_FAMILY_SETTING)))
     set_active_theme(theme)
     _apply_fonts(app, theme)
     app.setStyleSheet(render_stylesheet(theme))

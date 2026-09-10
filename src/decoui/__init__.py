@@ -63,6 +63,7 @@ Where to read further
 :mod:`decoui.registry`        how annotations are resolved and validated
 :mod:`decoui.runner`          ``gui_main`` and the startup order
 :mod:`decoui.engine.worker`   threading, output capture, cancellation, progress
+:mod:`decoui.process`         ``run_process()``: shelling out so Stop can stop it
 :mod:`decoui.assist`          completions / cascade / defaults callback rules
 :mod:`decoui.storage.store`   ``store()``: remembering something between runs
 :mod:`decoui.storage.models`  what a run records
@@ -71,6 +72,7 @@ Where to read further
 
 from .decorators import tool, toolset
 from .engine.worker import progress
+from .process import ProcessError, ProcessResult, run_process
 from .runner import gui_main
 from .storage.store import Store, store
 from .types import Choice, DirPath, F, FilePath, Text
@@ -80,6 +82,9 @@ __all__ = [
     "tool",
     "gui_main",
     "progress",
+    "run_process",
+    "ProcessResult",
+    "ProcessError",
     "store",
     "Store",
     "F",

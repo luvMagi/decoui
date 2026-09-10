@@ -29,9 +29,57 @@ from ..storage.db import (
     query_params,
     query_records,
 )
-from ..i18n import t
+from ..i18n import active_language, t
 from ..storage.models import ExecutionRecord
+from .icons import ICON_PX, theme_icon
 from .log_window import LogWindow
+
+#: Icon and colour token per run status. The tokens are the semantic ones the
+#: theme already defines for buttons and badges, so a tick is the same green as
+#: a Run button and a theme that restyles one restyles the other. A status with
+#: no entry gets no icon rather than a stand-in glyph: the word is already in
+#: the cell, and an icon meaning "unknown" would be inventing information.
+_STATUS_ICONS: dict[str, tuple[str, str]] = {
+    "success": ("status-success", "success"),
+    "error": ("status-error", "danger"),
+    "running": ("status-running", "accent"),
+    "cancelled": ("status-cancelled", "neutral"),
+}
+
+#: Languages whose readers mark a pass with something other than a tick, keyed
+#: by the status the substitution applies to.
+#:
+#: In Japan and Korea the mark for "correct" is a circle; a tick there reads
+#: closer to "this row is selected" than to "this run passed", which is the
+#: wrong thing for a column that is not selectable. The colour is unaffected --
+#: the circle is drawn from the same ``success`` token as the tick, so a theme
+#: restyles both at once.
+#:
+#: This lives in code rather than in the message catalogues on purpose: an icon
+#: name is not text, and the catalogues went back to holding only words when the
+#: glyphs came out of them.
+_LOCALISED_STATUS_ICONS: dict[str, dict[str, str]] = {
+    "ja-JP": {"success": "status-success-circle"},
+    "ko-KR": {"success": "status-success-circle"},
+}
+
+
+def _status_icon(status: str) -> tuple[str | None, str | None]:
+    """Return the icon name and colour token to mark one run status with.
+
+    Args:
+        status: The record's status, as stored.
+
+    Returns:
+        A ``(name, token)`` pair, or ``(None, None)`` for a status with no mark
+        of its own.
+    """
+    name, token = _STATUS_ICONS.get(status, (None, None))
+    if name is None:
+        return None, None
+    localised = _LOCALISED_STATUS_ICONS.get(active_language(), {})
+    return localised.get(status, name), token
+
 
 _COL_CHECK = 0
 _COL_TIME  = 1
@@ -138,6 +186,11 @@ class HistoryPage(QWidget):
         # own: opening History with no tool tab open used to leave the window
         # with no route back at all.
         header_row = QHBoxLayout()
+        # Two labels, not one: the icon is a themed pixmap and the heading is
+        # rich text, and a QLabel holds one or the other but never both.
+        self._heading_icon = QLabel(self)
+        self._heading_icon.setFixedSize(ICON_PX, ICON_PX)
+        header_row.addWidget(self._heading_icon)
         header_row.addWidget(QLabel(f"<b>{t('history.heading')}</b>"))
         header_row.addStretch()
         close_btn = QPushButton(t("history.close"), self)
@@ -177,6 +230,7 @@ class HistoryPage(QWidget):
 
         refresh_btn = QPushButton(t("history.refresh"), self)
         refresh_btn.clicked.connect(self.refresh)
+        self._refresh_btn = refresh_btn
 
         self._db_size_label = QLabel("", self)
         self._db_size_label.setToolTip(t("history.db_size_tooltip"))
@@ -253,6 +307,51 @@ class HistoryPage(QWidget):
         self._selected_record: ExecutionRecord | None = None
         self._open_log_windows: list = []
 
+        self._apply_icons()
+
+    def _apply_icons(self) -> None:
+        """Draw every icon on this page in the active theme's ink.
+
+        One method for all of them, called from ``_build_ui`` and again from
+        :meth:`retheme`, so the page has a single description of which icon
+        goes where rather than one per entry point that could drift.
+
+        The tokens differ because the hosts differ: an icon on a button is
+        button text and takes ``text.button``, while the one beside the heading
+        is part of the heading and takes ``text.primary``. Borrowing one token
+        for both is how an icon ends up dark on a theme whose buttons went dark.
+        """
+        ratio = self.devicePixelRatioF()
+        self._heading_icon.setPixmap(
+            theme_icon("history", "text.primary", ratio=ratio).pixmap(ICON_PX, ICON_PX)
+        )
+        for button, name in (
+            (self._refresh_btn, "refresh"),
+            (self._clear_db_btn, "clear"),
+            (self._delete_sel_btn, "delete"),
+            (self._replay_btn, "replay"),
+            (self._log_btn, "document"),
+        ):
+            button.setIcon(theme_icon(name, ratio=ratio))
+
+        # Rows already on screen. refresh() inks these as it builds each row,
+        # but a re-theme must not re-query: the table would lose the user's
+        # selection and their scroll position over a colour change.
+        for row, rec in enumerate(self._records):
+            item = self._table.item(row, _COL_STAT)
+            name, token = _status_icon(rec.status)
+            if item is not None and name is not None:
+                item.setIcon(theme_icon(name, token, ratio=ratio))
+
+    def retheme(self) -> None:
+        """Redraw the page's icons under the theme that has just become active.
+
+        Icons are pixmaps, and no stylesheet reaches inside one -- see
+        :mod:`decoui.ui.retheme`. Everything else on this page is dressed by the
+        application stylesheet and needs nothing here.
+        """
+        self._apply_icons()
+
     # ── Refresh ───────────────────────────────────────────────────────────────
 
     def show_for_tool(self, tool_id: str):
@@ -281,13 +380,17 @@ class HistoryPage(QWidget):
         self._records = query_records(tool_id=tool_id, status=status, since=since)
         self._table.setRowCount(len(self._records))
 
+        # Read once for the whole table rather than per row: every status icon
+        # is drawn at the same ratio, and this is the hot path when a long
+        # history is refreshed.
+        ratio = self.devicePixelRatioF()
+
         for row, rec in enumerate(self._records):
             duration = ""
             if rec.finished_at and rec.started_at:
                 secs = (rec.finished_at - rec.started_at).total_seconds()
                 duration = f"{secs:.1f}s"
 
-            status_icon = {"success": "✅", "error": "❌", "running": "▶", "cancelled": "⛔"}.get(rec.status, "?")
 
             # Checkbox cell
             chk = QTableWidgetItem()
@@ -297,7 +400,11 @@ class HistoryPage(QWidget):
 
             self._table.setItem(row, _COL_TIME, QTableWidgetItem(rec.started_at.strftime("%Y-%m-%d %H:%M:%S")))
             self._table.setItem(row, _COL_TOOL, QTableWidgetItem(rec.tool_label))
-            self._table.setItem(row, _COL_STAT, QTableWidgetItem(f"{status_icon} {t(f'history.status.{rec.status}')}"))
+            status = QTableWidgetItem(t(f"history.status.{rec.status}"))
+            icon_name, icon_token = _status_icon(rec.status)
+            if icon_name is not None:
+                status.setIcon(theme_icon(icon_name, icon_token, ratio=ratio))
+            self._table.setItem(row, _COL_STAT, status)
             self._table.setItem(row, _COL_DUR,  QTableWidgetItem(duration))
 
             result_preview = ""
@@ -459,7 +566,10 @@ class HistoryPage(QWidget):
         if not rows:
             return
         menu = QMenu(self)
-        del_act = menu.addAction(t("history.delete_selected_rows"))
+        del_act = menu.addAction(
+            theme_icon("delete", ratio=self.devicePixelRatioF()),
+            t("history.delete_selected_rows"),
+        )
         del_act.triggered.connect(lambda: self._delete_rows(rows))
         menu.exec(self._table.viewport().mapToGlobal(pos))
 

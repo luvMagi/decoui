@@ -5,6 +5,7 @@
   "colors": {
     "accent": "#0f1a0d",
     "accent.soft": "#9fbb9c",
+    "accent.check": "#2f7a45",
     "bg.app": "#bfbcb2",
     "bg.button": "#12190f",
     "bg.button_disabled": "#4a5046",
@@ -38,7 +39,7 @@
     "console.critical": "#ff0000",
     "console.debug": "#a0a0a0",
     "console.error": "#ff6b6b",
-    "console.info": "#39ff14",
+    "console.info": "#a7fe8e",
     "console.stdout": "#ffffff",
     "console.warning": "#ffd700",
     "danger": "#8b3020",

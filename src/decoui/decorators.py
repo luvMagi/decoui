@@ -100,6 +100,7 @@ def toolset(
 def tool(
     label: str,
     description: str = "",
+    help: str | None = None,
     icon: str | None = None,
     confirm: bool = False,
     timeout: int | None = None,
@@ -124,6 +125,17 @@ def tool(
         label: Tool display name, and the key used in every error message
             raised while validating the arguments below.
         description: Shown in a bordered box below the title.
+        help: Name of a Markdown file carrying this tool's help page, resolved
+            against the directory of the module the toolset class is defined in
+            -- see :func:`decoui.help.resolve_help_file`. It replaces the prose
+            of the docstring on the Help page and nothing else: the summary,
+            the parameter table and the Returns and Raises sections still come
+            from the docstring, because they describe the signature and a file
+            beside the module cannot be checked against it.
+
+            For help too long to sit comfortably in a docstring, or help that
+            wants translating: the lookup is per-language, the same way a guide
+            page is.
         icon: Reserved for a future icon lookup. Nothing reads it yet.
         confirm: Show a Yes/No dialog before running. Declare it on anything
             destructive: it is greppable, so ``grep -r "confirm=True"`` gives an
@@ -220,6 +232,7 @@ def tool(
         setattr(fn, _TOOL_ATTR, {
             "label": label,
             "description": description,
+            "help": help,
             "icon": icon,
             "confirm": confirm,
             "timeout": timeout,

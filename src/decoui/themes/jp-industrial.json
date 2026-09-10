@@ -5,6 +5,7 @@
   "colors": {
     "accent": "#8f550f",
     "accent.soft": "#dfb877",
+    "accent.check": "#d08825",
     "bg.app": "#bdb7a5",
     "bg.button": "#575e52",
     "bg.button_disabled": "#8d8b7c",
@@ -38,7 +39,7 @@
     "console.critical": "#ff0000",
     "console.debug": "#a0a0a0",
     "console.error": "#ff6b6b",
-    "console.info": "#39ff14",
+    "console.info": "#a7fe8e",
     "console.stdout": "#ffffff",
     "console.warning": "#ffd700",
     "danger": "#9a3319",
@@ -77,7 +78,8 @@
   "font": {
     "family": [
       "Tahoma",
-      "Yu Gothic UI",
+      "BIZ UDPGothic",
+      "Noto Sans JP",
       "DejaVu Sans",
       "sans-serif"
     ],
@@ -85,6 +87,8 @@
     "letter_spacing": 1,
     "mono_family": [
       "Cascadia Mono",
+      "M PLUS 1 Code",
+      "Noto Sans Mono",
       "Consolas",
       "DejaVu Sans Mono",
       "monospace"

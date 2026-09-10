@@ -13,6 +13,10 @@ What each toolset demonstrates::
                   reporting, and on_cancel cleanup around a child process
     AssistTools   completions / cascade / defaults driven by instance state
                   loaded in on_startup()
+    FontTools     a tool with no parameters at all, whose output is meant to be
+                  looked at rather than read: sample text in every script the
+                  interface ships a language for; also the one tool whose Help
+                  page comes from a Markdown file rather than from its docstring
 
 Note:
     **A tool's docstring is written for the person using the tool**, not for the
@@ -50,7 +54,7 @@ import subprocess
 import sys
 import time
 
-from decoui import progress, tool, toolset
+from decoui import progress, run_process, tool, toolset
 from decoui import store
 
 
@@ -110,6 +114,12 @@ class TextTools:
         Demonstrates a plain ``str`` parameter (single-line field) and output
         through ``logging`` at two levels.
 
+        # This is H1
+        | Source | Where it comes from | What it becomes |
+        |--------|--------------------|-----------------|
+        | Tool docstring | `@tool`-decorated method | Summary, prose, parameter table, Returns, Raises |
+        | Toolset docstring | `@toolset`-decorated class | The group's page |
+        | Markdown file | `@tool(help="...")` | Replaces the tool's **prose** only |
         Args:
             content: Text to measure.
 
@@ -588,6 +598,79 @@ class DemoTools:
         progress(steps, steps, "done")
         return f"Completed {steps} steps."
 
+    # ── Copy this one when your tool shells out ──────────────────────────
+    #
+    # run_process() is the supported way to run an external program, and the
+    # reason is cancellation. Stop works by injecting an exception into the
+    # worker thread, and CPython raises it at the next bytecode boundary -- a
+    # thread parked inside subprocess.run() does not reach one until the child
+    # exits by itself. The child has to be killed from outside first.
+    #
+    # Doing that by hand needs three things, and the obvious way to write this
+    # gets none of them:
+    #
+    #   1. keep the Popen handle where the GUI thread can reach it. This is the
+    #      one subprocess.run() cannot do at all -- it keeps its handle to
+    #      itself, so declaring on_cancel does not help. That is the shape a
+    #      real incident had: Stop appeared to work and pg_dump kept running.
+    #   2. declare @tool(on_cancel=...) and terminate the child from it.
+    #   3. remember terminate() kills one process and not the tree under it, so
+    #      anything the child forked -- or a shell in between -- survives it.
+    #
+    # run_process does all three. See run_child_process below for what steps 1
+    # and 2 look like written out, and docs/cancelling-a-run.md for the
+    # measurements behind these claims.
+    #
+    # Two more things it handles that plain subprocess does not:
+    #
+    #   * Output. decoui replaces sys.stdout with an object that has no
+    #     fileno(), so a child left to inherit stdout writes *past* the console.
+    #     run_process reads the pipe and prints line by line, so the output
+    #     appears as it happens.
+    #   * Telling failure from cancellation. result.cancelled is True only when
+    #     decoui killed the child. Pass check=True and a program that fails on
+    #     its own raises ProcessError, while a cancelled one never does -- a
+    #     Stop must not be recorded as an error.
+    #
+    # shell=True is refused: a shell is an extra process in between, it is what
+    # makes quoting a security question, and it is what leaves a grandchild
+    # holding the connection open after the shell is killed. Pass a list.
+    @tool(
+        label="Run External Tool",
+        description=(
+            "Shell out through decoui's own runner. Press Stop while it runs: "
+            "nothing here declares a cleanup hook, and it still stops."
+        ),
+    )
+    def run_external(self, seconds: int = 30) -> str:
+        """Run an external program and show its output as it arrives.
+
+        Press Stop at any point: the program is ended, along with anything it
+        started, and the run is recorded as cancelled rather than as a failure.
+
+        Args:
+            seconds: How long the program should run. It prints one line a
+                second, so this is also how many lines to expect.
+
+        Returns:
+            How the program ended.
+        """
+        script = (
+            "import sys, time\n"
+            "for i in range(int(sys.argv[1])):\n"
+            "    print(f'child tick {i + 1}', flush=True)\n"
+            "    time.sleep(1)\n"
+        )
+        # A list, never a string: see the note above about shell=True. -u stops
+        # the child buffering its output for the whole run, which would defeat
+        # the streaming.
+        result = run_process([sys.executable, "-u", "-c", script, str(seconds)])
+        # Distinguishing the two is the caller's job -- run_process reports it
+        # rather than guessing what a non-zero status meant.
+        if result.cancelled:
+            return "Stopped, and the child went with it."
+        return f"Child exited {result.returncode}."
+
     @tool(
         label="Run Child Process",
         description=(
@@ -604,7 +687,10 @@ class DemoTools:
     ) -> str:
         """Run a chatty child process and stream its output to the console.
 
-        This is the tool to copy when writing anything that shells out.
+        This is the long way round, kept because it shows what
+        ``run_process`` does on your behalf. To actually write a tool that
+        shells out, copy [[DemoTools.run_external]] instead: it is four lines
+        and it kills the whole process tree, which the hook below does not.
 
         Pressing Stop injects an exception into the worker thread, but this
         thread spends nearly all its time inside a C call -- reading the child's
@@ -832,3 +918,134 @@ class AssistTools:
             Initial values for the form.
         """
         return dict(self.preferences)
+
+
+# ── Language samples ──────────────────────────────────────────────────────────
+
+# Three lines per language, in the order the locale files are shipped in.
+#
+# Line 1 is prose: it shows whether the face has the script at all, and how its
+# letterforms sit next to the Latin tag in front of them. Line 2 is fixed-width
+# bait -- digits, box drawing and, for the CJK entries, half- and full-width
+# forms of the same characters -- because a console only reads as a console if
+# those columns line up. Line 3 is the punctuation and diacritics that fall
+# through to a fallback face first, which is where a stack shows its seams.
+#
+# The tags are deliberately ASCII: they are the fixed point the eye measures the
+# rest of the line against.
+_LANGUAGE_SAMPLES: list[tuple[str, str, tuple[str, str, str]]] = [
+    ("en", "English", (
+        "The quick brown fox jumps over the lazy dog.",
+        "0123456789  ILil1 O0o  |||||| ──────  [{(<>)}]",
+        "Curly \u201cquotes\u201d, an em\u2014dash, ellipsis\u2026 and a fraction \u00bd.",
+    )),
+    ("de-DE", "Deutsch", (
+        "Falsches \u00dcben von Xylophonmusik qu\u00e4lt jeden gr\u00f6\u00dferen Zwerg.",
+        "0123456789  ILil1 O0o  |||||| ──────  [{(<>)}]",
+        "\u00c4\u00d6\u00dc \u00e4\u00f6\u00fc \u00df \u2014 \u201eGro\u00dfschreibung\u201c heute \u00fcblich.",
+    )),
+    ("es", "Espa\u00f1ol", (
+        "El veloz murci\u00e9lago hind\u00fa com\u00eda feliz cardillo y kiwi.",
+        "0123456789  ILil1 O0o  |||||| ──────  [{(<>)}]",
+        "\u00bfQu\u00e9 a\u00f1o? \u00a1Ninguno! \u2014 \u00e1\u00e9\u00ed\u00f3\u00fa \u00fc \u00f1 \u00ab comillas \u00bb",
+    )),
+    ("fr-FR", "Fran\u00e7ais", (
+        "Portez ce vieux whisky au juge blond qui fume.",
+        "0123456789  ILil1 O0o  |||||| ──────  [{(<>)}]",
+        "\u00e0\u00e2\u00e6\u00e7\u00e9\u00e8\u00ea\u00eb\u00ee\u00ef\u00f4\u0153\u00f9\u00fb\u00fc\u00ff \u2014 \u00ab espace fine \u00bb ; oui !",
+    )),
+    ("id-ID", "Bahasa Indonesia", (
+        "Muharjo seorang xenofobia universal yang takut pada warga Qatar.",
+        "0123456789  ILil1 O0o  |||||| ──────  [{(<>)}]",
+        "Riwayat dijalankan \u2014 \u201ctanda kutip\u201d, titik\u2026 dan tanda hubung-.",
+    )),
+    ("ja-JP", "\u65e5\u672c\u8a9e", (
+        "\u5b9f\u884c\u5c65\u6b74\u3092\u66f4\u65b0\u3057\u307e\u3057\u305f\u3002\u30c4\u30fc\u30eb\u3092\u691c\u7d22\u3057\u3066\u304f\u3060\u3055\u3044\u3002",
+        "0123456789  \uff10\uff11\uff12\uff13\uff14\uff15\uff16\uff17\uff18\uff19  \uff8a\uff9d\uff76\uff9e\uff78 / \u5168\u89d2  ──────",
+        "\u6f22\u5b57\u30fb\u3072\u3089\u304c\u306a\u30fb\u30ab\u30bf\u30ab\u30ca\u3001\u300c\u62ec\u5f27\u300d\u3068\u9577\u97f3\u30fc\u3002",
+    )),
+    ("ko-KR", "\ud55c\uad6d\uc5b4", (
+        "\ub2e4\ub78c\uc950 \ud4e8\uc988\ub97c \ub9c8\uc2dc\uba70 \uc2e4\ud589 \uae30\ub85d\uc744 \uc0c8\ub85c \uace0\uce68\ub2c8\ub2e4.",
+        "0123456789  \uff10\uff11\uff12\uff13\uff14\uff15\uff16\uff17\uff18\uff19  \uac00\ub098\ub2e4\ub77c  ──────",
+        "\ud55c\uae00\u00b7\u6f22\u5b57 \ud63c\uc6a9, \u300c\uad04\ud638\u300d\uc640 \ub9c8\uce68\ud45c.",
+    )),
+    ("pt-BR", "Portugu\u00eas", (
+        "Zebras caolhas de Java querem passar fax para moscovita.",
+        "0123456789  ILil1 O0o  |||||| ──────  [{(<>)}]",
+        "\u00e1\u00e2\u00e3\u00e0\u00e7\u00e9\u00ea\u00ed\u00f3\u00f4\u00f5\u00fa \u2014 execu\u00e7\u00e3o conclu\u00edda, n\u00e3o?",
+    )),
+    ("ru-RU", "\u0420\u0443\u0441\u0441\u043a\u0438\u0439", (
+        "\u0421\u044a\u0435\u0448\u044c \u0436\u0435 \u0435\u0449\u0451 \u044d\u0442\u0438\u0445 \u043c\u044f\u0433\u043a\u0438\u0445 \u0444\u0440\u0430\u043d\u0446\u0443\u0437\u0441\u043a\u0438\u0445 \u0431\u0443\u043b\u043e\u043a.",
+        "0123456789  \u0410\u0412\u0415\u041a\u041c\u041d\u041e\u0420\u0421\u0422  \u0430\u0432\u0435\u043a\u043c\u043d\u043e\u0440\u0441\u0442  ──────",
+        "\u0401\u0451 \u0429\u0449 \u042a\u044a \u042c\u044c \u2014 \u00ab\u0451\u043b\u043e\u0447\u043a\u0438\u00bb \u0438 \u0442\u0438\u0440\u0435.",
+    )),
+    ("tr-TR", "T\u00fcrk\u00e7e", (
+        "Pijamal\u0131 hasta ya\u011f\u0131z \u015fof\u00f6re \u00e7abucak g\u00fcvendi.",
+        "0123456789  ILil1 O0o  \u0130i \u0049\u0131  ──────  [{(<>)}]",
+        "\u00c7\u011e\u0130\u00d6\u015e\u00dc \u00e7\u011f\u0131\u00f6\u015f\u00fc \u2014 dotted \u0130 vs dotless \u0131.",
+    )),
+    ("zh-CN", "\u7b80\u4f53\u4e2d\u6587", (
+        "\u5df2\u5237\u65b0\u8fd0\u884c\u5386\u53f2\uff0c\u8bf7\u5728\u4e0a\u65b9\u641c\u7d22\u5de5\u5177\u3002",
+        "0123456789  \uff10\uff11\uff12\uff13\uff14\uff15\uff16\uff17\uff18\uff19  \u4e00\u4e8c\u4e09\u56db  ──────",
+        "\u5168\u89d2\u6807\u70b9\uff1a\uff0c\u3002\uff1b\uff1a\u201c\u201d\u2018\u2019\uff08\uff09\u3010\u3011\u2014\u2014",
+    )),
+    ("zh-TW", "\u7e41\u9ad4\u4e2d\u6587", (
+        "\u5df2\u91cd\u65b0\u6574\u7406\u57f7\u884c\u6b77\u53f2\uff0c\u8acb\u5728\u4e0a\u65b9\u641c\u5c0b\u5de5\u5177\u3002",
+        "0123456789  \uff10\uff11\uff12\uff13\uff14\uff15\uff16\uff17\uff18\uff19  \u58f9\u8cb3\u53c3\u8086  ──────",
+        "\u5168\u5f62\u6a19\u9ede\uff1a\uff0c\u3002\uff1b\uff1a\u300c\u300d\u300e\u300f\uff08\uff09\u3010\u3011\u2500\u2500",
+    )),
+]
+
+
+@toolset(
+    label="Font Tools",
+    tags=["demo", "text"],
+    description="Prints multilingual sample text, for judging a theme's font stack.",
+)
+class FontTools:
+    """Sample text in every language decoui's interface ships in.
+
+    Written for looking at, not for parsing: a font stack is only as good as the
+    scripts it actually covers, and the way to find a hole in one is to put the
+    scripts side by side and look. The console is the place to do it because it
+    draws in ``mono_family``, which is the stack most likely to be missing a
+    script -- code faces often ship Latin and nothing else.
+    """
+
+    # help= points at a Markdown file instead of leaving the whole explanation
+    # in the docstring below. The file supplies the prose on the Help page; the
+    # summary, the parameter table and Returns still come from the docstring,
+    # so the two cannot drift apart from the signature.
+    #
+    # The path is relative to this module's directory, and decoui inserts a
+    # language directory into it when one exists -- tool_help/ja-JP/... would be
+    # picked up automatically under a Japanese interface.
+    @tool(
+        label="Language Samples",
+        description="Print three lines in each of decoui's interface languages.",
+        help="tool_help/language-samples.md",
+    )
+    def language_samples(self) -> str:
+        """Print three lines of sample text for every interface language.
+
+        The lines go to the console through ``print``, so they are drawn in the
+        theme's monospaced face. To judge the interface face instead, read the
+        same scripts in the sidebar and the buttons after switching language in
+        Settings.
+
+        What to look for, per language: whether every character has a glyph at
+        all, whether the digits and box-drawing line up into columns, and
+        whether any run of characters is visibly a different face from the text
+        around it -- that last one is the stack falling through, and it is only
+        a fault if it looks like one.
+
+        Returns:
+            A count of what was printed.
+        """
+        for code, name, lines in _LANGUAGE_SAMPLES:
+            print(f"[{code}] {name}")
+            for line in lines:
+                print(f"  {line}")
+            print()
+
+        return f"Printed {len(_LANGUAGE_SAMPLES)} languages, 3 lines each."

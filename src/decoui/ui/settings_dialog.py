@@ -1,16 +1,23 @@
 """The application settings dialog.
 
-Two settings, and both about how decoui presents itself rather than about what
-it does: the theme and the interface language. This dialog is deliberately
-narrow -- it is not a drawer for everything that might one day be configurable.
-Layout preferences decoui persists on its own (sidebar width, window geometry)
-stay where they are; they are remembered, not chosen.
+Three settings, and all three about how decoui presents itself rather than about
+what it does: the theme, the interface font, and the interface language. This
+dialog is deliberately narrow -- it is not a drawer for everything that might
+one day be configurable. Layout preferences decoui persists on its own (sidebar
+width, window geometry) stay where they are; they are remembered, not chosen.
 
-The two differ in when they land, and the dialog says so before the user
-chooses. A new **theme** is applied to every open window as the dialog closes.
-A new **language** waits for the next launch: text is read as widgets are built,
-in far more places than colour is, and there is no equivalent of the application
-stylesheet to catch the rest.
+They differ in when they land, and the dialog says so before the user chooses. A
+new **theme** and a new **font** are applied to every open window as the dialog
+closes. A new **language** waits for the next launch: text is read as widgets
+are built, in far more places than colour is, and there is no equivalent of the
+application stylesheet to catch the rest.
+
+The font box overrides one token, ``font.family``, and leaves the theme's sizes
+and its monospaced stack alone -- see :func:`decoui.theme.with_font_family` for
+why. Left empty it overrides nothing, which is why the box shows the running
+theme's own stack as placeholder text rather than filling it in: an empty box
+means "the theme decides", and pre-filling it would turn every visit to this
+dialog into a font choice the user never made.
 """
 from __future__ import annotations
 
@@ -20,6 +27,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFormLayout,
     QLabel,
+    QLineEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -33,11 +41,13 @@ from ..i18n import (
     t,
 )
 from ..theme import (
+    FONT_FAMILY_SETTING,
     THEME_SETTING,
     active_theme,
     active_theme_dir,
     builtin_themes,
     discover_themes,
+    parse_font_family,
 )
 from .retheme import retheme_application
 
@@ -66,9 +76,9 @@ def _preselect(combo: QComboBox, *, stored: str | None, in_effect: str) -> None:
 
 
 class SettingsDialog(QDialog):
-    """Modal dialog for choosing the theme and the interface language.
+    """Modal dialog for choosing the theme, the interface font and the language.
 
-    Each dropdown starts on **the stored choice** rather than on what the
+    Every field starts on **the stored choice** rather than on what the
     running window happens to be showing. That still matters for the language,
     which lands on the next launch: a user who picked one, pressed OK and
     reopened the dialog would otherwise find their choice apparently discarded
@@ -81,7 +91,7 @@ class SettingsDialog(QDialog):
     """
 
     def __init__(self, parent: QWidget | None = None) -> None:
-        """Build the dialog and preselect the stored theme and language.
+        """Build the dialog and preselect the stored theme, font and language.
 
         Args:
             parent: Qt parent, used to centre the dialog over the window.
@@ -120,6 +130,23 @@ class SettingsDialog(QDialog):
         )
         self._initial_id = self._combo.currentData()
 
+        # A plain line edit rather than a font picker: what a theme holds is a
+        # *stack* tried in order, and the point of the last entry being a
+        # generic family is that the application still renders on a machine that
+        # has none of the named faces. A picker can only offer one installed
+        # font, which is exactly the thing that does not travel.
+        #
+        # A name that matches nothing installed is not rejected. Qt simply falls
+        # through to the next entry, which is the same thing it does for a theme
+        # file naming a font this machine lacks -- and a box that refused every
+        # face the user has not installed yet would be wrong the moment they
+        # install one.
+        self._font = QLineEdit(self)
+        self._font.setText(get_setting(FONT_FAMILY_SETTING) or "")
+        self._show_theme_font()
+        self._combo.currentIndexChanged.connect(self._show_theme_font)
+        self._initial_family = parse_font_family(self._font.text())
+
         # Languages are labelled by their own name for themselves -- a reader
         # looking for their language recognises "Deutsch", not "German", and by
         # definition cannot read the current interface language well enough for
@@ -136,6 +163,7 @@ class SettingsDialog(QDialog):
 
         form = QFormLayout()
         form.addRow(t("settings.theme"), self._combo)
+        form.addRow(t("settings.font_family"), self._font)
         form.addRow(t("settings.language"), self._language)
 
         # Permanent, not a reaction to changing the selection: the user should
@@ -165,6 +193,33 @@ class SettingsDialog(QDialog):
         """
         return str(self._combo.currentData())
 
+    def _show_theme_font(self, _index: int = 0) -> None:
+        """Put the selected theme's own font stack behind the empty font box.
+
+        Re-run whenever the theme selection moves, so the hint describes the
+        theme the user is about to get rather than the one they arrived under.
+        Without that, someone switching theme and leaving the font box empty
+        would be told the wrong thing about what an empty box means for them.
+
+        Args:
+            _index: The combo box row, which the signal supplies and this does
+                not need -- it reads the selection back off the box. Defaulted
+                so ``__init__`` can call it directly for the first fill.
+        """
+        theme = self._themes.get(self.selected_theme_id())
+        if theme is not None:
+            self._font.setPlaceholderText(", ".join(theme.font.family))
+
+    def selected_font_family(self) -> tuple[str, ...]:
+        """Return the font stack currently typed into the box.
+
+        Returns:
+            The families in the order given, or an empty tuple when the box says
+            nothing usable -- which is the value that means "leave the theme's
+            own stack alone".
+        """
+        return parse_font_family(self._font.text())
+
     def selected_language(self) -> str:
         """Return the language code currently shown in the combo box.
 
@@ -184,16 +239,31 @@ class SettingsDialog(QDialog):
         what was stored. The two can disagree -- a stored theme whose file has
         since gone missing leaves the dialog offering the running one instead --
         and it is the running one a re-theme would be redoing.
+
+        The font is compared parsed rather than as typed, so that re-spacing the
+        same names is not a change. What gets stored is the parsed form joined
+        back up: the box is then re-read exactly as it will be applied, and a
+        stray trailing comma does not survive to puzzle whoever reads the
+        settings table.
         """
         chosen = self.selected_theme_id()
         if chosen != self._initial_id:
             set_setting(THEME_SETTING, chosen)
+        family = self.selected_font_family()
+        if family != self._initial_family:
+            set_setting(FONT_FAMILY_SETTING, ", ".join(family))
         language = self.selected_language()
         if language != self._initial_language:
             set_setting(LANGUAGE_SETTING, language)
 
+        # A font change re-themes even when the theme itself did not move: the
+        # family reaches the window through the same three routes a theme does
+        # -- the application stylesheet, the application font, and the widgets
+        # that build their own style -- and only this pass covers all three.
         theme = self._themes.get(chosen)
-        if theme is not None and chosen != active_theme().id:
+        if theme is not None and (
+            chosen != active_theme().id or family != self._initial_family
+        ):
             retheme_application(theme)
 
         super().accept()

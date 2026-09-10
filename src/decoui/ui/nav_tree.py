@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QLineEdit, QTreeWidget, QTreeWidgetItem, QVBoxLayo
 
 from ..i18n import t
 from ..registry import ToolInfo, ToolSetInfo
+from .icons import theme_icon
 
 
 class NavTree(QWidget):
@@ -36,6 +37,13 @@ class NavTree(QWidget):
         self._search = QLineEdit(self)
         self._search.setPlaceholderText(t("nav.search_placeholder"))
         self._search.textChanged.connect(self._filter)
+        # addAction, not a character in the placeholder: a placeholder is text
+        # and disappears the moment anything is typed, which took the magnifier
+        # with it. A leading action is part of the field and stays put.
+        self._search_icon = self._search.addAction(
+            theme_icon("search", "text.muted", ratio=self.devicePixelRatioF()),
+            QLineEdit.ActionPosition.LeadingPosition,
+        )
         layout.addWidget(self._search)
 
         self._tw = QTreeWidget(self)
@@ -46,6 +54,17 @@ class NavTree(QWidget):
         layout.addWidget(self._tw)
 
         self._populate()
+
+    def retheme(self) -> None:
+        """Redraw the search field's magnifier in the new theme's ink.
+
+        Icons are pixmaps and no stylesheet reaches inside one; everything else
+        in the sidebar is dressed by the application stylesheet. See
+        :mod:`decoui.ui.retheme`.
+        """
+        self._search_icon.setIcon(
+            theme_icon("search", "text.muted", ratio=self.devicePixelRatioF())
+        )
 
     def _populate(self):
         """Rebuild the visible rows from the search text and active tags."""

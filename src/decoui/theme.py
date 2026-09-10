@@ -37,7 +37,7 @@ from __future__ import annotations
 import json
 import re
 import traceback
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import cache
 from importlib import resources
 from pathlib import Path
@@ -56,6 +56,17 @@ DEFAULT_THEME_ID = "light"
 #: startup, and two spellings of one key fail silently: the choice is saved and
 #: then never found again.
 THEME_SETTING = "ui.theme"
+
+#: Settings key holding the interface font stack the user typed in Settings, as
+#: one comma-separated string. Here for the same reason THEME_SETTING is: the
+#: startup path reads the key the dialog writes, and two spellings of one key
+#: fail silently.
+#:
+#: Unset or empty means "whatever the theme asks for". This is an override laid
+#: over the theme rather than a replacement for it, so a user who picks a font
+#: and then switches theme keeps their font, and one who clears the box gets the
+#: new theme's own stack back.
+FONT_FAMILY_SETTING = "ui.font.family"
 
 #: A theme id: lowercase, digits and hyphens, starting with an alphanumeric.
 _ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -127,6 +138,14 @@ COLOR_TOKENS: frozenset[str] = frozenset({
     # ── Accent and semantics ─────────────────────────────────────────────────
     "accent",
     "accent.soft",         # selection fills
+    "accent.check",        # the fill of a ticked check box, in a form or in the
+                           # history table. Its own token rather than `accent`
+                           # because a check indicator carries no text: `accent`
+                           # is chosen to be a ground for `text.on_accent` to
+                           # sit on, and a theme is free to make it dark on that
+                           # basis -- cockpit does, and its check boxes came out
+                           # near-black squares. This one is only ever seen on
+                           # its own, so it has to read as "on" unaided.
     "success", "success.hover",
     "danger", "danger.hover",
     "neutral",
@@ -827,6 +846,50 @@ def active_theme() -> Theme:
     return _ACTIVE_THEME
 
 
+def parse_font_family(text: str | None) -> tuple[str, ...]:
+    """Read a typed family stack into the tuple a :class:`FontSpec` holds.
+
+    The setting is stored the way it is typed -- one comma-separated string --
+    because that is also how a theme file writes a stack and how CSS writes one,
+    and a user who knows either already knows this box.
+
+    Args:
+        text: Comma-separated family names. ``None``, empty, and a string of
+            nothing but separators all mean the same thing: no override.
+
+    Returns:
+        The families in the order given, with surrounding space and empty
+        entries dropped. Empty when the input names nothing usable.
+    """
+    if not text:
+        return ()
+    return tuple(name.strip() for name in text.split(",") if name.strip())
+
+
+def with_font_family(theme: Theme, families: tuple[str, ...]) -> Theme:
+    """Return ``theme`` with its interface font stack replaced.
+
+    Only ``font.family`` moves. ``font.mono_family`` is left alone deliberately:
+    the console and the log viewer align their output in columns, which holds
+    only for as long as that face stays monospaced, and a user choosing an
+    interface font has said nothing about their terminal. The sizes stay too --
+    they are the theme's proportions, not the user's choice of face.
+
+    Args:
+        theme: The theme to derive from. It is not modified; ``Theme`` and
+            ``FontSpec`` are both frozen.
+        families: The replacement stack, as :func:`parse_font_family` returns
+            it. Empty leaves the theme untouched, so a caller can pass a parsed
+            setting straight through without testing it first.
+
+    Returns:
+        The derived theme, or ``theme`` itself when there is nothing to apply.
+    """
+    if not families:
+        return theme
+    return replace(theme, font=replace(theme.font, family=families))
+
+
 def theme_font(theme: Theme):
     """Build the application font a theme asks for.
 
@@ -1114,8 +1177,8 @@ QCheckBox::indicator {
     background: $bg_field;
 }
 QCheckBox::indicator:checked {
-    background-color: $accent;
-    border-color: $accent;
+    background-color: $accent_check;
+    border-color: $accent_check;
 }
 /* Progress */
 QProgressBar {
@@ -1149,6 +1212,22 @@ QTableWidget::item {
 QTableWidget::item:selected {
     background-color: $accent_soft;
     color: $text_primary;
+}
+/* The check column in the history table. Left to the platform style it is a
+   bare tick drawn in the text colour -- no box, no fill, and nothing like the
+   QCheckBox a form puts three inches away. These rules are the same ones the
+   QCheckBox indicator gets, so a check mark means the same thing to the eye
+   wherever it appears. */
+QTableWidget::indicator {
+    width: 16px;
+    height: 16px;
+    border: $shape_border_width_emphasis solid $border_field;
+    border-radius: $shape_radius_small;
+    background: $bg_field;
+}
+QTableWidget::indicator:checked {
+    background-color: $accent_check;
+    border-color: $accent_check;
 }
 /* Scrollbars */
 QScrollBar:vertical {

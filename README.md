@@ -401,6 +401,18 @@ Tool methods can use `print()` and the standard `logging` module. Both are captu
 
 Return values from tool methods are **not** displayed in the GUI. Use `logging` or `print` for any output you want users to see.
 
+### `run_process` — calling an external program
+
+```python
+from decoui import run_process
+
+result = run_process(["pg_dump", "-d", "app"], check=True)
+```
+
+Runs the program, streams its output into the console line by line, and lets
+Stop kill it — and everything it spawned — without the tool declaring anything.
+Plain `subprocess` does neither. See [Cancellation](#cancellation).
+
 ### Progress
 
 Long, quiet work looks indistinguishable from a hang. `progress()` drives the page's progress bar and the status text next to it:
@@ -443,54 +455,98 @@ Outside a running tool — when you instantiate the toolset and call the method 
 
 ## Cancellation
 
-**If your tool starts a subprocess, declare `on_cancel`.** Without it, pressing Stop leaves the child
-running.
+Stop is the hardest promise decoui makes, because Python cannot keep it on its own.
 
-Cancellation works by injecting an exception into the worker thread. That has two consequences most
-cleanup code gets wrong:
+Cancellation works by injecting an exception into the worker thread, and CPython raises it **at the
+next bytecode boundary**. A thread parked in a C call never reaches one. `proc.wait()`,
+`socket.recv()`, a long `time.sleep()` — the exception stays pending until that call returns by
+itself, and the tool's `finally` does not run either.
 
-**1. `except Exception` does not catch it.** The injected `_WorkerCancelled` derives from
-`BaseException`, so an ordinary handler lets it pass straight through.
+So whatever is holding the thread has to be released *from outside*. Everything below follows from
+that one fact.
 
-**2. `finally` does not save you either.** The injected exception is only raised at a Python bytecode
-boundary. A thread parked in `proc.wait()`, `socket.recv()` or any other C call does not reach one
-until that call returns on its own — so a `finally` block waiting to terminate the child does not run
-until the child has already finished. That is the entire problem: the child is exactly what needs to
-be stopped.
-
-`on_cancel` runs on the GUI thread, *before* the interrupt is injected, while the worker is still
-blocked. That is the only moment anything can reach the child:
+### If your tool shells out, use `run_process`
 
 ```python
+from decoui import run_process, tool, toolset
+
 @toolset(label="Database")
 class RestoreTools:
 
-    @tool(label="Restore", on_cancel="stop")
-    def restore(self, archive: Path) -> None:
-        self.proc = subprocess.Popen(["pg_restore", str(archive)], encoding="utf-8")
-        self.proc.wait()
-
-    def stop(self) -> None:
-        proc = getattr(self, "proc", None)
-        if proc is not None and proc.poll() is None:
-            proc.terminate()
+    @tool(label="Restore")
+    def restore(self, archive: Path) -> str:
+        result = run_process(["pg_restore", str(archive)])
+        if result.cancelled:
+            return "Stopped."
+        return f"pg_restore exited {result.returncode}."
 ```
 
-**3. The hook runs concurrently with your tool.** It is on the GUI thread while the tool body is
-still on the worker thread, so:
+No handle to keep, no `on_cancel` to declare. `run_process` registers the child with the running
+tool, so Stop kills it **and everything it spawned**.
 
-- keep it to idempotent interruption — `terminate()`, `close()`, `cancel()` — and do not touch state
-  the tool body is writing;
-- tolerate state that does not exist yet: Stop can be pressed before the tool assigns it, which is
-  why the example reads `getattr(self, "proc", None)`;
-- keep it fast. It blocks the GUI. Slow cleanup belongs in the tool's own `finally`.
+It also streams the child's output into the page console line by line, which plain `subprocess`
+cannot: decoui replaces `sys.stdout` with an object that has no `fileno()`, so a child left to
+inherit stdout writes past the console rather than into it.
+
+| | |
+|---|---|
+| `result.returncode` | the child's exit status |
+| `result.output` | everything it wrote, already printed |
+| `result.cancelled` | True only when decoui killed it |
+| `check=True` | raise `ProcessError` if the program fails — a *cancelled* run never raises, because that status is decoui's doing |
+| `shell=True` | refused: a shell is what leaves an unkillable grandchild behind. Pass a list |
+
+**`subprocess.run()` cannot be made stoppable**, with or without a hook — it keeps its handle to
+itself, so there is nothing for a hook to terminate. That is the shape a real incident had: Stop
+appeared to work and the dump kept running.
+
+> Measured, not assumed: every claim here is a test in
+> [tests/test_stop_external_process.py](tests/test_stop_external_process.py), driving the real engine
+> against a real child process. Full matrix in
+> [docs/cancelling-a-run.md](docs/cancelling-a-run.md).
+
+### If your tool blocks on something else, declare `on_cancel`
+
+For a socket read, a database driver, a lock — anything `run_process` cannot reach — the hook is
+still the only way. It runs on the GUI thread, *before* the interrupt is injected, while the worker
+is still blocked:
+
+```python
+@tool(label="Query", on_cancel="stop")
+def query(self) -> None:
+    self.conn = driver.connect(...)
+    self.conn.execute(long_query)
+
+def stop(self) -> None:
+    conn = getattr(self, "conn", None)
+    if conn is not None:
+        conn.cancel()
+```
+
+Three properties the hook must have:
+
+- **Idempotent.** A Stop that arrives before the tool has assigned the state the hook reads does
+  nothing, and a second Stop is the user's only way out of that — hence `getattr(self, "conn", None)`
+  rather than `self.conn`.
+- **Fast.** It blocks the GUI. Slow cleanup belongs in the tool's own `finally`.
+- **Concurrent with your tool.** It is on the GUI thread while the body is still on the worker
+  thread, so do not touch state the body is writing.
 
 A hook that raises is reported as an `ERROR` line in that run's log; cancellation still completes.
 
-**4. After cancellation the run is recorded as `cancelled` and the return value is dropped.** The
-`Popen` object is left unusable, too: the injection can land between `waitpid()` returning and
-`Popen` recording the status, so `proc.returncode` may stay `None` even though the child is gone.
-Check the child through the OS if you need its fate.
+### What else to know
+
+**`except Exception` does not catch it.** The injected `_WorkerCancelled` derives from
+`BaseException`, so an ordinary handler lets it pass straight through. That is deliberate — cleanup
+written as `except Exception` must not be able to swallow a cancellation and carry on.
+
+**A cancelled run is recorded as `cancelled`, never `success`,** and the return value is dropped. A
+tool that returns normally after Stop was pressed is still recorded as cancelled: the user asked for
+it to stop, and a partial result must not look like a whole one.
+
+**Do not trust `proc.returncode` after a cancellation** if you manage a child yourself. The injection
+can land between `waitpid()` returning and `Popen` recording the status, so it may stay `None` even
+though the child is gone. Ask the OS.
 
 `timeout=` uses this same path — from the tool's side a timeout and a Stop press are the same event.
 
@@ -631,14 +687,25 @@ and is translated with the rest of the interface.
 Each page opens in its own tab, the way the main window opens a tool, and the
 arrows above the tabs walk back and forward through the pages visited.
 
-### Cross-references
+### Writing help
 
-A docstring or a guide page can point at another page:
+Docstrings and guide pages are Markdown: headings, fenced code blocks, tables,
+ordered and nested lists, blockquotes. Two departures, because the source is
+sometimes a Python docstring:
+
+- ` ``literals`` ` in double backticks are accepted alongside single, since that
+  is what reST — and therefore a Python docstring — uses;
+- indented code blocks are **not** recognised. A docstring's indentation is an
+  artefact of where it sits in the file. Fence code instead.
+
+**Cross-references have their own syntax, `[[key]]`,** deliberately not
+Markdown's link syntax:
 
 ```
-[Encode Text](MyTools.encode)     one tool
-[Text Tools](MyTools)             a whole toolset
-[Themes](guide.themes)            one of decoui's own pages
+[[MyTools.encode]]                one tool
+[[MyTools]]                       a whole toolset
+[[guide.themes]]                  one of decoui's own pages
+[[guide.themes|the theme page]]   with your own text
 ```
 
 The target is a **key**, never a title or a file name:
@@ -650,16 +717,38 @@ The target is a **key**, never a title or a file name:
 | `ClassName` | a toolset |
 | `ClassName.method` | a tool |
 
-Keys do not change when a page is translated, so one written link works in
-every language.
-
-A reference to a key that does not resolve — a tool the application did not
+Keys do not change when a page is translated, so one written link works in every
+language. A reference that does not resolve — a tool the application did not
 load, a typo — renders as its own text with no link on it. Which tools exist is
-up to the application, so a guide cannot be written against a fixed set, and a
-dead link is worse than the sentence without it. Only decoui's own scheme is
-followed; an `http` URL written into a docstring stays inert.
+up to the application, so help cannot be written against a fixed set, and a dead
+link is worse than the sentence without it.
+
+Keeping references out of `[text](target)` is what lets that form mean what it
+means everywhere else: **`[text](https://…)` is an ordinary link** and opens in
+the reader's browser. Only `http`, `https` and `mailto` are followed.
 
 Link colour comes from the theme's `text.link` token.
+
+### Help in a file
+
+When a tool's help outgrows its docstring, or wants translating, point at a
+Markdown file:
+
+```python
+@tool(label="Deploy", help="doc/deploy.md")
+def deploy(self, service: str = "web") -> str:
+    ...
+```
+
+The path is relative to the module the toolset class is defined in, and decoui
+inserts a language directory into it — `doc/<language>/deploy.md`, falling back
+to `doc/en/deploy.md` and then `doc/deploy.md`.
+
+The file replaces the **prose** and nothing else: the summary, the parameter
+table and Returns still come from the docstring, because they describe the
+signature and a file beside the module cannot be checked against it.
+
+> Full reference: [docs/help-authoring.md](docs/help-authoring.md).
 
 ---
 

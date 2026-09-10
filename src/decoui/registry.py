@@ -67,6 +67,11 @@ class ToolInfo:
     defaults: Any = None
     completion_debounce_ms: int = DEFAULT_DEBOUNCE_MS
     labels: dict[str, str] = field(default_factory=dict)
+    # Defaulted, and therefore down here rather than beside `description` where
+    # it belongs by meaning: ToolInfo is constructed positionally in places
+    # outside this module, and a new required field would break every one of
+    # them. Optional metadata earns no right to do that.
+    help: str | None = None
     on_cancel: Any = None
 
 
@@ -259,6 +264,7 @@ def build_tree(*toolset_classes) -> list[ToolSetInfo]:
                 method=method,
                 label=tool_meta["label"],
                 description=tool_meta["description"],
+                help=tool_meta.get("help"),
                 icon=tool_meta["icon"],
                 confirm=tool_meta["confirm"],
                 timeout=tool_meta["timeout"],

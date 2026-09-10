@@ -9,19 +9,22 @@ the tools already carry. Nothing has to be declared twice.
 """
 from __future__ import annotations
 
-import re
 from html import escape
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import QPoint, QSize, Qt, QUrl
+from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QPushButton,
     QSplitter,
+    QTabBar,
     QTabWidget,
     QTextBrowser,
+    QToolButton,
     QTreeWidget,
     QTreeWidgetItem,
     QTreeWidgetItemIterator,
@@ -29,10 +32,20 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..assets import icon_path
 from ..guide import GuidePage, guide_pages
+from ..markup import (
+    EXTERNAL_SCHEMES,
+    LINK_SCHEME,
+    inline as render_inline,
+    reference,
+    render,
+)
 from ..help import ToolHelp, ToolSetHelp, build_help
 from ..i18n import t
 from ..theme import active_theme, apply_label_case
+from .icons import ICON_PX, theme_icon
+from .sidebar_width import stored_sidebar_width
 
 #: Role holding a tree item's page key. The key, not the object: it is what a
 #: tab, a history entry and a written cross-reference all address a page by, so
@@ -44,6 +57,16 @@ _HELP_ROLE = Qt.ItemDataRole.UserRole
 #: the pages under it as ``guide.<slug>`` -- the same shape as a toolset and
 #: its tools, which are ``ClassName`` and ``ClassName.method``.
 _GUIDE_INDEX = "guide"
+
+#: Close-button geometry, matching :mod:`decoui.ui.main_window`. The two tab
+#: strips are the same control doing the same job in two windows, and a reader
+#: with both open should not be able to tell them apart.
+_CLOSE_BUTTON_SIZE = 16
+_CLOSE_ICON_SIZE = 10
+#: Qt pins the tab's right-side widget to the tab rectangle's edge, which lands
+#: on top of the tab border. The holder carries this much right margin so the
+#: glyph is inset within the tab instead of straddling its boundary.
+_CLOSE_BUTTON_INSET = 7
 
 
 class HelpWindow(QMainWindow):
@@ -75,7 +98,12 @@ class HelpWindow(QMainWindow):
         """
         super().__init__(parent=None)
         self.setWindowTitle(t("help.title"))
-        self.resize(940, 660)
+        # Wider than the window needs for prose alone. Help pages now carry
+        # tables and fenced code, and both have a width below which they stop
+        # being readable rather than merely getting taller: a table starts
+        # wrapping inside its cells, and a code sample wraps mid-line, which is
+        # the one place a line break changes the meaning.
+        self.resize(1180, 760)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
         self._sets: list[ToolSetHelp] = build_help(tree)
@@ -118,16 +146,26 @@ class HelpWindow(QMainWindow):
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(6)
 
+        # Drawn, not typed. These carried the characters U+2190 and U+2192,
+        # which render at whatever weight the interface font gives an arrow --
+        # noticeably lighter than everything around them in most faces, and
+        # lighter still under a theme that asks for a condensed one. A triangle
+        # of decoui's own is the same weight in every theme, and matches the
+        # icons on the top bar. See :mod:`decoui.ui.icons`.
         nav_row = QHBoxLayout()
         nav_row.setSpacing(4)
-        self._back_btn = QPushButton(t("help.back"), right)
-        self._back_btn.setFixedWidth(36)
+        self._back_btn = QPushButton(right)
         self._back_btn.setToolTip(t("help.back_tooltip"))
         self._back_btn.clicked.connect(self._go_back)
-        self._forward_btn = QPushButton(t("help.forward"), right)
-        self._forward_btn.setFixedWidth(36)
+        self._forward_btn = QPushButton(right)
         self._forward_btn.setToolTip(t("help.forward_tooltip"))
         self._forward_btn.clicked.connect(self._go_forward)
+        for button in (self._back_btn, self._forward_btn):
+            button.setFixedSize(32, 32)
+            button.setIconSize(QSize(ICON_PX, ICON_PX))
+            # The application stylesheet spends 14px of padding either side,
+            # which is right for a word and leaves an icon nothing.
+            button.setStyleSheet("QPushButton { padding: 0px; }")
         nav_row.addWidget(self._back_btn)
         nav_row.addWidget(self._forward_btn)
         nav_row.addStretch()
@@ -135,16 +173,26 @@ class HelpWindow(QMainWindow):
 
         self._tabs = QTabWidget(right)
         self._tabs.setDocumentMode(True)
-        self._tabs.setTabsClosable(True)
         self._tabs.setMovable(True)
-        self._tabs.tabCloseRequested.connect(self._close_tab)
         self._tabs.currentChanged.connect(self._on_tab_changed)
+        tab_bar = self._tabs.tabBar()
+        tab_bar.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        tab_bar.customContextMenuRequested.connect(self._show_tab_context_menu)
         right_layout.addWidget(self._tabs)
 
         splitter.addWidget(right)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
-        splitter.setSizes([260, 680])
+        # The tree opens at the width the main window's sidebar is set to, so
+        # that help placed beside the form it explains lines up with it rather
+        # than reading as a misalignment. The reading pane takes whatever is
+        # left, which is where the extra window width was wanted anyway.
+        #
+        # Read, not written: dragging this handle re-proportions the page being
+        # read, and having that quietly resize the main window's sidebar too
+        # would be a side effect nobody asked this splitter for.
+        tree_width = stored_sidebar_width()
+        splitter.setSizes([tree_width, max(1, self.width() - tree_width)])
         layout.addWidget(splitter)
 
         bottom = QHBoxLayout()
@@ -154,9 +202,20 @@ class HelpWindow(QMainWindow):
         bottom.addWidget(close_btn)
         layout.addLayout(bottom)
 
+        self._apply_icons()
         apply_label_case(central)
         self._rebuild_tree()
         self._open_first()
+
+    def _apply_icons(self) -> None:
+        """Draw the navigation arrows in the active theme's button ink.
+
+        Icons are pixmaps and no stylesheet reaches inside one, so a re-theme
+        redraws rather than restyles -- see :mod:`decoui.ui.retheme`.
+        """
+        ratio = self.devicePixelRatioF()
+        self._back_btn.setIcon(theme_icon("nav-back", ratio=ratio))
+        self._forward_btn.setIcon(theme_icon("nav-forward", ratio=ratio))
 
     # ── The page index ────────────────────────────────────────────────────────
 
@@ -281,19 +340,145 @@ class HelpWindow(QMainWindow):
         self._open_tabs[key] = browser
         index = self._tabs.addTab(browser, self._title_for(key))
         self._tabs.setTabToolTip(index, key)
+        self._install_close_button(index)
         return browser
 
     def _follow(self, url: QUrl) -> None:
-        """Open the page a cross-reference points at.
+        """Follow a clicked link: another help page, or the outside world.
+
+        A cross-reference carries decoui's own scheme and moves this window. An
+        ordinary URL is handed to the desktop, which opens it in the browser --
+        the help window is not one, and rendering a fetched page inside a
+        QTextBrowser would be both worse to read and a way to put the network
+        in front of a reader who only meant to click a footnote.
 
         Args:
-            url: The clicked anchor. Anything not carrying decoui's own scheme
-                is ignored -- an ``http`` link written into a docstring must
-                not reach the network from here.
+            url: The clicked anchor.
+
+        Note:
+            The scheme is checked again here even though
+            :func:`decoui.markup.inline` already refused to build an anchor for
+            anything outside :data:`decoui.markup.EXTERNAL_SCHEMES`. The two
+            checks guard different things: that one decides what looks like a
+            link, this one decides what is handed to the desktop, and the second
+            is the one that matters if a page is ever rendered from HTML that
+            did not come through the renderer.
         """
-        if url.scheme() != LINK_SCHEME:
+        scheme = url.scheme().lower()
+        if scheme == LINK_SCHEME:
+            self._navigate(
+                url.path() or url.toString().removeprefix(f"{LINK_SCHEME}:")
+            )
             return
-        self._navigate(url.path() or url.toString().removeprefix(f"{LINK_SCHEME}:"))
+        if scheme in EXTERNAL_SCHEMES:
+            QDesktopServices.openUrl(url)
+
+    def _install_close_button(self, index: int) -> None:
+        """Attach a close button to a tab, inset from the tab's right edge.
+
+        Qt's own close button is not used, for the reason
+        :meth:`decoui.ui.main_window.MainWindow._install_close_button` gives:
+        its position is fixed at the tab boundary regardless of stylesheet
+        padding, so it sits on top of the tab's own border.
+
+        Args:
+            index: Position of the tab that was just added.
+        """
+        tab_bar = self._tabs.tabBar()
+        holder = QWidget(tab_bar)
+        holder.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        row = QHBoxLayout(holder)
+        row.setContentsMargins(0, 0, _CLOSE_BUTTON_INSET, 0)
+        row.setSpacing(0)
+
+        button = QToolButton(holder)
+        button.setObjectName("tabCloseButton")
+        button.setIcon(QIcon(str(icon_path("tab-close"))))
+        button.setIconSize(QSize(_CLOSE_ICON_SIZE, _CLOSE_ICON_SIZE))
+        button.setFixedSize(_CLOSE_BUTTON_SIZE, _CLOSE_BUTTON_SIZE)
+        button.setToolTip(t("tabs.close"))
+        button.setCursor(Qt.CursorShape.ArrowCursor)
+        button.clicked.connect(lambda: self._close_tab_holding(holder))
+        row.addWidget(button)
+
+        tab_bar.setTabButton(index, QTabBar.ButtonPosition.RightSide, holder)
+
+    def _close_tab_holding(self, holder: QWidget) -> None:
+        """Close the tab whose close button lives in the provided holder.
+
+        The index is resolved on click because tabs are movable, so an index
+        captured at creation time goes stale.
+
+        Args:
+            holder: The widget the pressed button sits in.
+        """
+        tab_bar = self._tabs.tabBar()
+        for index in range(tab_bar.count()):
+            if tab_bar.tabButton(index, QTabBar.ButtonPosition.RightSide) is holder:
+                self._close_tab(index)
+                return
+
+    def _close_other_tabs(self, index: int) -> None:
+        """Close every tab except the one at the provided index.
+
+        Args:
+            index: The tab to keep.
+        """
+        if index < 0 or index >= self._tabs.count():
+            return
+        keep = self._tabs.widget(index)
+        for position in range(self._tabs.count() - 1, -1, -1):
+            if self._tabs.widget(position) is not keep:
+                self._close_tab(position)
+        self._tabs.setCurrentWidget(keep)
+
+    def _close_all_tabs(self) -> None:
+        """Close every tab, leaving the window empty but still navigable.
+
+        The history survives: back still works, and following it reopens the
+        page it lands on. Closing a tab has never meant forgetting it.
+        """
+        while self._tabs.count() > 0:
+            self._close_tab(self._tabs.count() - 1)
+
+    def _create_tab_context_menu(self, index: int) -> QMenu:
+        """Create tab actions bound to the tab at the provided index.
+
+        Args:
+            index: Index of the tab that was right-clicked.
+
+        Returns:
+            A context menu containing close actions for that tab.
+        """
+        menu = QMenu(self)
+        close_tab_action = menu.addAction(t("tabs.close"))
+        close_other_tabs_action = menu.addAction(t("tabs.close_others"))
+        close_all_tabs_action = menu.addAction(t("tabs.close_all"))
+        close_other_tabs_action.setEnabled(self._tabs.count() > 1)
+        close_tab_action.triggered.connect(
+            lambda _checked=False: self._close_tab(index)
+        )
+        close_other_tabs_action.triggered.connect(
+            lambda _checked=False: self._close_other_tabs(index)
+        )
+        close_all_tabs_action.triggered.connect(
+            lambda _checked=False: self._close_all_tabs()
+        )
+        return menu
+
+    def _show_tab_context_menu(self, position: QPoint) -> None:
+        """Show close actions for the tab under the pointer.
+
+        Args:
+            position: Click position, in tab bar coordinates.
+        """
+        tab_bar = self._tabs.tabBar()
+        tab_index = tab_bar.tabAt(position)
+        if tab_index < 0:
+            return
+        menu = self._create_tab_context_menu(tab_index)
+        menu.exec(tab_bar.mapToGlobal(position))
+        menu.deleteLater()
 
     def _close_tab(self, index: int) -> None:
         """Close one tab, leaving its page in the history.
@@ -409,6 +594,7 @@ class HelpWindow(QMainWindow):
         """
         for key, browser in self._open_tabs.items():
             browser.setHtml(self._wrap(self._render(key)))
+        self._apply_icons()
 
     # ── The tree ──────────────────────────────────────────────────────────────
 
@@ -521,6 +707,32 @@ a {{ color: {colors['text.link']}; }}
 .muted   {{ color: {colors['text.muted']}; }}
 code {{ font-family: {', '.join(font.mono_family)};
         background: {colors['bg.field']}; padding: 1px 4px; }}
+/* A fenced block, which is the only way to write a code sample: see
+   decoui.markup for why indentation is not the other way. It is inked like the
+   console rather than like an inline literal -- a sample is a thing to read as
+   a block, and the console is the reader's reference for what code looks like
+   in this application. */
+pre {{ font-family: {', '.join(font.mono_family)};
+       background: {colors['bg.console']}; color: {colors['console.stdout']};
+       border: 1px solid {colors['border.console']};
+       padding: 8px 10px; margin: 1em 0; }}
+/* Headings an author writes, which start at h2: h1 is the page title and is
+   decoui's, not theirs. Sized down the scale rather than by a fixed step, so a
+   theme that sets a larger body size keeps the hierarchy legible. */
+h3 {{ font-size: {font.size_pt}pt; margin: 1.4em 0 0.4em 0;
+      color: {colors['text.secondary']}; }}
+h4, h5, h6 {{ font-size: {font.size_pt}pt; margin: 1.2em 0 0.3em 0;
+              color: {colors['text.muted']}; }}
+/* Tinted rather than ruled down the left edge, which is the usual way to draw
+   a quote and which Qt's rich-text CSS silently drops -- border-left on a block
+   element is not in the subset QTextBrowser implements, so it rendered as a
+   bare indent that read like a stray paragraph. */
+blockquote {{ margin: 1em 0; padding: 6px 10px;
+              background: {colors['bg.header']};
+              color: {colors['text.secondary']}; }}
+hr {{ height: 1px; background: {colors['border.subtle']}; border: none;
+      margin: 1.4em 0; }}
+ol {{ margin: 1em 0; }}
 table {{ border-collapse: collapse; width: 100%; margin: 4px 0 2px 0; }}
 th {{ background: {colors['bg.header']}; color: {colors['text.secondary']};
       text-align: left; padding: 5px 8px;
@@ -538,168 +750,6 @@ li {{ margin: 0.15em 0; line-height: 145%; }}
 </style></head><body>{body}</body></html>"""
 
 
-#: reST inline literals, which is how a Python docstring marks code. Double
-#: backticks are the real form; single backticks are accepted because they are
-#: written by habit often enough that rendering them raw looks like a bug.
-#: Inline spans, matched in one pass so that a code literal consumes its own
-#: text before emphasis can look at it -- otherwise ``**kwargs`` inside a
-#: literal would come out half-bold.
-_INLINE_RE = re.compile(
-    # Links come first so that a link whose text carries its own markup --
-    # ``[**Themes**](guide.themes)`` -- is seen as a link rather than half
-    # eaten by the emphasis branch.
-    r"\[(?P<link_text>[^\]\n]+)\]\((?P<link_target>[A-Za-z_][\w.]*)\)"
-    r"|``(?P<lit2>.+?)``"
-    r"|`(?P<lit1>.+?)`"
-    r"|\*\*(?P<bold>\S.*?)\*\*"
-    r"|\*(?P<em>\S.*?)\*",
-    re.DOTALL,
-)
-
-#: URL scheme for a cross-reference. A scheme of decoui's own, so a click can
-#: never navigate the browser to anything but a page decoui itself rendered --
-#: and so an ``http`` link written in a docstring stays inert rather than
-#: quietly reaching the network.
-LINK_SCHEME = "decoui"
-
-#: Sphinx cross-reference roles. The target is useful to a reader, the role
-#: prefix is not -- it is markup for a doc builder decoui does not run. Stripped
-#: so ``:meth:`stop_child``` reads as ``stop_child`` rather than leaking syntax.
-_ROLE_RE = re.compile(r":(?:func|meth|class|mod|data|attr|exc|obj|ref|py:\w+):(?=`)")
-
-#: A line opening a bullet in reST prose: ``* text`` or ``- text``.
-_BULLET_RE = re.compile(r"^\s*[*-]\s+(?P<text>.*)$")
-
-
-def _inline(text: str, links: frozenset[str] = frozenset()) -> str:
-    """Escape prose and render its inline markup as HTML.
-
-    Handles what a docstring and a guide page have in common: ``literals``,
-    ``**bold**``, ``*emphasis*``, ``[cross references](key)``, and Sphinx role
-    prefixes, which are stripped because the target is useful to a reader and
-    the role name is markup for a doc builder decoui does not run.
-
-    A cross-reference names a page by its key -- ``guide.themes``,
-    ``MyTools``, ``MyTools.encode`` -- never by a file name or a title. Keys do
-    not change when a page is translated, so one written link works in every
-    language.
-
-    Args:
-        text: Raw text from a docstring or a guide page.
-        links: Keys that actually resolve to a page in this session. A
-            reference to anything else renders as its own text with no link on
-            it: which tools exist is up to the application that loaded them, so
-            a guide cannot be written against a fixed set, and a dead link is
-            worse than plain prose.
-
-    Returns:
-        HTML-safe text with its markup rendered.
-    """
-    escaped = _ROLE_RE.sub("", escape(text))
-
-    def render(match: re.Match[str]) -> str:
-        if (target := match.group("link_target")) is not None:
-            # The label goes back through the same pass, so a link may carry
-            # markup of its own. It cannot nest: the label pattern excludes
-            # "]", so there is no second link inside this one to recurse into.
-            label = _INLINE_RE.sub(render, match.group("link_text"))
-            if target not in links:
-                return label
-            return f'<a href="{LINK_SCHEME}:{target}">{label}</a>'
-        if (literal := match.group("lit2") or match.group("lit1")) is not None:
-            return f"<code>{literal}</code>"
-        if (bold := match.group("bold")) is not None:
-            return f"<b>{bold}</b>"
-        return f"<i>{match.group('em')}</i>"
-
-    return _INLINE_RE.sub(render, escaped)
-
-
-def _reference(key: str, label: str, links: frozenset[str]) -> str:
-    """Render one already-known key as a link, or as plain text.
-
-    Used where the target comes from decoui's own data rather than from prose
-    -- a row in a contents table -- so there is nothing to parse, only the same
-    question of whether the target is reachable.
-
-    Args:
-        key: The page key to point at.
-        label: Visible text. Escaped here; callers pass it raw.
-        links: Keys that resolve to a page in this session.
-
-    Returns:
-        An anchor, or the escaped label alone.
-    """
-    if key not in links:
-        return escape(label)
-    return f'<a href="{LINK_SCHEME}:{key}">{escape(label)}</a>'
-
-
-def _bullets(block: str, links: frozenset[str] = frozenset()) -> str | None:
-    """Render a block as a list when it is one.
-
-    Args:
-        block: One blank-line-delimited block of docstring prose.
-        links: Keys that resolve to a page, passed through to :func:`_inline`.
-
-    Returns:
-        The block as ``<ul>``, or None when it does not open with a bullet.
-        A bullet's text may wrap onto following, more-indented lines.
-    """
-    lines = block.splitlines()
-    if not lines or not _BULLET_RE.match(lines[0]):
-        return None
-
-    items: list[list[str]] = []
-    for line in lines:
-        match = _BULLET_RE.match(line)
-        if match:
-            items.append([match.group("text")])
-        elif items and line.strip():
-            items[-1].append(line.strip())
-        # A blank line inside a list separates items, not paragraphs; ignored.
-
-    rendered = "".join(
-        f"<li>{_inline(' '.join(item), links)}</li>" for item in items
-    )
-    return f"<ul>{rendered}</ul>"
-
-
-def _paragraphs(
-    text: str, css_class: str = "", links: frozenset[str] = frozenset()
-) -> str:
-    """Render blank-line-separated prose as HTML paragraphs and lists.
-
-    A block that opens with ``*`` or ``-`` becomes a list; everything else
-    becomes a paragraph with its wrapped lines rejoined, since a line break
-    inside a docstring paragraph is an artefact of the source width, not of
-    what the author meant.
-
-    Args:
-        text: Raw docstring prose.
-        css_class: Class applied to every paragraph, if any. Lists never take
-            it -- it exists for the summary, which is never a list.
-        links: Keys that resolve to a page, passed through to :func:`_inline`.
-
-    Returns:
-        The prose as HTML, or an empty string when there is no text.
-    """
-    if not text.strip():
-        return ""
-    attr = f" class='{css_class}'" if css_class else ""
-    out: list[str] = []
-    for block in text.split("\n\n"):
-        if not block.strip():
-            continue
-        rendered = _bullets(block, links)
-        if rendered is not None:
-            out.append(rendered)
-        else:
-            body = _inline(block.strip(), links).replace(chr(10), " ")
-            out.append(f"<p{attr}>{body}</p>")
-    return "".join(out)
-
-
 def _guide_html(page: GuidePage, links: frozenset[str] = frozenset()) -> str:
     """Render one of decoui's own pages.
 
@@ -710,7 +760,7 @@ def _guide_html(page: GuidePage, links: frozenset[str] = frozenset()) -> str:
     Returns:
         HTML for the right-hand pane.
     """
-    return f"<h1>{escape(page.title)}</h1>{_paragraphs(page.body, links=links)}"
+    return f"<h1>{escape(page.title)}</h1>{render(page.body, links)}"
 
 
 def _guide_index_html(
@@ -733,8 +783,8 @@ def _guide_index_html(
     for page in pages:
         first = page.body.split("\n\n")[0] if page.body else ""
         parts.append(
-            f"<tr><td><b>{_reference(page.page_id, page.title, links)}</b></td>"
-            f"<td>{_inline(first.replace(chr(10), ' '), links)}</td></tr>"
+            f"<tr><td><b>{reference(page.page_id, page.title, links)}</b></td>"
+            f"<td>{render_inline(first.replace(chr(10), ' '), links)}</td></tr>"
         )
     parts.append("</table>")
     return "".join(parts)
@@ -752,13 +802,13 @@ def _group_html(group: ToolSetHelp, links: frozenset[str] = frozenset()) -> str:
     """
     parts = [f"<h1>{escape(group.label)}</h1>"]
     if group.summary:
-        parts.append(_paragraphs(group.summary, "summary", links))
-    parts.append(_paragraphs(group.description, links=links))
+        parts.append(render(group.summary, links, css_class="summary"))
+    parts.append(render(group.description, links))
     parts.append(f"<h2>{t('help.tools')}</h2><table>")
     for tool in group.tools:
         parts.append(
-            f"<tr><td><b>{_reference(tool.tool_id, tool.label, links)}</b></td>"
-            f"<td>{_inline(tool.summary, links)}</td></tr>"
+            f"<tr><td><b>{reference(tool.tool_id, tool.label, links)}</b></td>"
+            f"<td>{render_inline(tool.summary, links)}</td></tr>"
         )
     parts.append("</table>")
     return "".join(parts)
@@ -776,8 +826,8 @@ def _tool_html(tool: ToolHelp, links: frozenset[str] = frozenset()) -> str:
     """
     parts = [f"<h1>{escape(tool.label)}</h1>"]
     if tool.summary:
-        parts.append(_paragraphs(tool.summary, "summary", links))
-    parts.append(_paragraphs(tool.description, links=links))
+        parts.append(render(tool.summary, links, css_class="summary"))
+    parts.append(render(tool.description, links))
 
     if tool.params:
         parts.append(f"<h2>{t('help.parameters')}</h2><table>")
@@ -789,7 +839,7 @@ def _tool_html(tool: ToolHelp, links: frozenset[str] = frozenset()) -> str:
         )
         for param in tool.params:
             mark = " <span class='req'>*</span>" if param.required else ""
-            text = _inline(param.text, links) if param.text else (
+            text = render_inline(param.text, links) if param.text else (
                 "<span class='muted'>—</span>"
             )
             parts.append(
@@ -806,10 +856,10 @@ def _tool_html(tool: ToolHelp, links: frozenset[str] = frozenset()) -> str:
 
     if tool.returns:
         parts.append(
-            f"<h2>{t('help.returns')}</h2>" + _paragraphs(tool.returns, links=links)
+            f"<h2>{t('help.returns')}</h2>" + render(tool.returns, links)
         )
     if tool.raises:
         parts.append(
-            f"<h2>{t('help.raises')}</h2>" + _paragraphs(tool.raises, links=links)
+            f"<h2>{t('help.raises')}</h2>" + render(tool.raises, links)
         )
     return "".join(parts)
