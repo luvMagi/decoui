@@ -146,6 +146,8 @@ gui_main(title="My App", db_path="~/.myapp/history.db", on_startup=connect_backe
 | `db_path` | `str\|Path\|None` | `~/.decoui/history.db` | SQLite database path for execution history and application settings. |
 | `on_startup` | `callable\|None` | `None` | Application-wide setup, run once before any toolset is created and before the window appears. See [Startup](#startup). |
 | `toolsets` | `Sequence[type]\|None` | `None` | The `@toolset` classes to load. When omitted, every one visible in the calling namespace is discovered. |
+| `theme` | `str\|None` | `None` | Default theme id. A theme the user picked in Settings wins over it. See [Themes](#themes). |
+| `theme_dir` | `str\|Path\|None` | `~/.decoui/themes` | Directory scanned for user-supplied theme files. |
 
 By default `gui_main()` scans the caller's namespace, so a toolset has to be imported *and* look used:
 
@@ -487,6 +489,109 @@ A hook that raises is reported as an `ERROR` line in that run's log; cancellatio
 Check the child through the OS if you need its fate.
 
 `timeout=` uses this same path — from the tool's side a timeout and a Stop press are the same event.
+
+---
+
+## Themes
+
+A theme sets colours, corner radii, border widths and fonts -- per part, not
+per application: the sidebar, the tool list inside it, input fields, buttons,
+tabs, tables and the output console each have their own tokens, so a theme can
+put a dark panel behind the tool list while the rest of the window stays light.
+It cannot add or move widgets.
+
+| id | Name | Look |
+|---|---|---|
+| `light` | Light | The default. Rounded, blue accent. |
+| `cockpit` | Cockpit Panel | Military instrument panel: olive-grey chassis, green accent, hard edges. |
+| `nasa` | Mission Control | Warm off-white console: square corners, deep green accent, monospace. |
+| `jp-industrial` | Industrial 1980s | Japanese workstation: beige chassis, burnt-orange accent, square. |
+
+The three panel themes are recolours and re-geometries of the same interface,
+not replicas of a hardware console: decoui has no header band, status lamps or
+bezel screws to dress, and a theme cannot add any.
+
+```python
+gui_main(title="Ops", theme="light", theme_dir="~/.decoui/themes")
+```
+
+| Parameter | Meaning |
+|---|---|
+| `theme` | The application's **default** theme id. A theme the user picks in Settings wins over it. |
+| `theme_dir` | Where user themes are read from. Defaults to `~/.decoui/themes`. A missing directory is fine and is never created. |
+
+### Writing one
+
+Drop a `.json` file into the theme directory. Nothing needs rebuilding, and the
+new theme appears the next time the application starts.
+
+```json
+{
+  "version": 1,
+  "id": "brand",
+  "name": "Brand",
+  "extends": "light",
+  "colors": {
+    "accent": "#0f766e",
+    "accent.soft": "#ccfbf1",
+    "bg.tree": "#0d1a0b",
+    "text.on_sidebar": "#cfd8c3"
+  },
+  "shape": { "shape.radius_control": 2 },
+  "font": { "mono_family": ["JetBrains Mono", "monospace"], "small_size_pt": 8 }
+}
+```
+
+The token groups:
+
+| Group | Covers |
+|---|---|
+| `bg.*` | every surface separately -- app, page, top bar, tabs, sidebar, tool list, fields, buttons, table, console |
+| `text.*` | including `text.on_sidebar`, which is what lets the tool list sit on a dark panel |
+| `border.*` | panels, fields, buttons, tabs, focus, and the console's frame |
+| `console.*` | one colour per log level, so a light console is possible at all |
+| `shape.*` | five corner radii and two border widths; set the radii to `0` to square everything off |
+| `font.*` | `family` / `size_pt` / `letter_spacing`, plus `mono_family` and `mono_size_pt` for the console and `title_size_px` / `small_size_pt` for headings and secondary controls |
+
+Font families are **stacks**: Qt falls through them in order, so end every one with
+a generic family (`monospace`, `sans-serif`) or the theme lands on Qt's default
+wherever its preferred face is missing.
+
+* `id` is the stable key — it is what gets saved when the user selects the
+  theme, so **renaming `name` never loses their choice**.
+* `extends` starts from a built-in theme and overrides only the keys you list.
+  Without it, every token must be present.
+* `extends` always resolves against the theme decoui ships, even if another
+  file has taken over that id — so one theme can never quietly re-base another.
+* Colours are `#rrggbb` only. There are no gradients: every token is one flat
+  colour, so metallic and bevelled looks are out of reach.
+* Setting the `shape.radius_*` tokens to `0` squares the whole interface off.
+
+Run `python -c "import decoui.theme as t; print(sorted(t.COLOR_TOKENS))"` for
+the full token list.
+
+### When a theme is broken
+
+A theme is presentation, so a bad one never stops the application:
+
+| Situation | What happens |
+|---|---|
+| One file is invalid | It is skipped; every other theme still loads |
+| The selected theme is invalid or missing | The light theme is used instead |
+| Either of the above | The application starts, and reports it in the startup dialog |
+
+A selected theme that has gone missing is **not** un-selected — the file may be
+absent only on this machine, and the choice takes effect again once it returns.
+
+### Changing theme
+
+The gear button at the top right opens **Settings**, which lists every theme
+available -- built-in and user-supplied alike -- and starts on the one currently
+in effect.
+
+Themes are applied once, at startup, so a change takes effect the next time the
+application runs. Nothing about the open window changes when the dialog closes;
+that is why the dialog says so before you choose.
 
 ---
 

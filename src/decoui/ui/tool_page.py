@@ -13,6 +13,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
+    QFrame,
     QApplication,
     QFormLayout,
     QHBoxLayout,
@@ -36,6 +37,7 @@ from ..assist import (
 )
 from ..engine.executor import ExecutionEngine
 from ..registry import ToolInfo
+from ..theme import active_theme, apply_label_case
 from ..widget_builder import (
     build_widget,
     coerce_params,
@@ -43,14 +45,59 @@ from ..widget_builder import (
     get_value,
     set_value,
 )
-from .log_window import LEVEL_COLORS, LogEntry, LogWindow
+from .log_window import LogEntry, LogWindow, console_style, default_color, level_colors
 
-_STATUS_STYLES = {
-    "running":   "color:#fff; background:#3b5bdb; border-radius:10px; padding:2px 10px;",
-    "success":   "color:#fff; background:#2b9348; border-radius:10px; padding:2px 10px;",
-    "error":     "color:#fff; background:#dc3545; border-radius:10px; padding:2px 10px;",
-    "cancelled": "color:#fff; background:#6c757d; border-radius:10px; padding:2px 10px;",
+#: Status badge -> the theme colour token that inks it.
+_STATUS_INK = {
+    "running": "text.on_accent",
+    "success": "text.on_success",
+    "error": "text.on_danger",
+    "cancelled": "text.on_neutral",
 }
+
+#: Status badge -> the theme colour token that fills it.
+_STATUS_TOKENS = {
+    "running": "accent",
+    "success": "success",
+    "error": "danger",
+    "cancelled": "neutral",
+}
+
+
+def _small_button_style(theme) -> str:
+    """Return the stylesheet for the console's compact buttons.
+
+    Args:
+        theme: The active theme.
+
+    Returns:
+        A stylesheet setting only padding and the theme's small text size; the
+        colours still come from the application stylesheet's QPushButton rules.
+    """
+    return f"padding: 0 10px; font-size: {theme.font.small_size_pt:g}pt;"
+
+
+def _status_style(status: str) -> str:
+    """Build the pill stylesheet for one run status.
+
+    Read from the theme at call time rather than baked into a module constant,
+    so the badge follows whichever theme the application started under.
+
+    Args:
+        status: One of the keys of :data:`_STATUS_TOKENS`.
+
+    Returns:
+        A stylesheet for the status label.
+    """
+    theme = active_theme()
+    fill = theme.colors[_STATUS_TOKENS[status]]
+    # Each badge sits on its own fill, and each fill has its own ink: a theme
+    # may make Done a bright colour that needs dark text while Error stays dark.
+    ink = _STATUS_INK[status]
+    return (
+        f"color:{theme.colors[ink]}; background:{fill}; "
+        f"border-radius:{theme.shape['shape.radius_pill']:g}px; padding:2px 10px;"
+    )
 
 
 class ToolPage(QWidget):
@@ -116,20 +163,44 @@ class ToolPage(QWidget):
         self._engine.log_line.connect(self._append_log)
         self._engine.finished.connect(self._on_finished)
         self._engine.progress.connect(self._on_progress)
+        # Pages are built after the window, so they need their own pass.
+        apply_label_case(self)
 
     # ── UI construction ───────────────────────────────────────────────────────
 
     def _build_ui(self):
         """Assemble the header, parameter form, controls and console."""
+        _theme = active_theme()
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 12, 16, 12)
-        root.setSpacing(8)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # Separates the page from the tab row above it. It lives here rather
+        # than in the stylesheet because the tab widget runs in document mode,
+        # where Qt draws neither QTabWidget::pane's border nor one on the tab
+        # bar -- the page is the only part of that boundary we control.
+        separator = QFrame(self)
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setFixedHeight(1)
+        separator.setStyleSheet(
+            f"background: {_theme.colors['border.panel']}; border: none;"
+        )
+        root.addWidget(separator)
+
+        body = QVBoxLayout()
+        body.setContentsMargins(16, 12, 16, 12)
+        body.setSpacing(8)
+        root.addLayout(body)
+        root = body
 
         # ── Header ────────────────────────────────────────────────────────────
         header = QHBoxLayout()
         header.setSpacing(8)
         title = QLabel(f"<b>{self._tool.label}</b>", self)
-        title.setStyleSheet("font-size: 15px; color: #1e2128;")
+        title.setStyleSheet(
+            f"font-size: {_theme.font.title_size_px:g}px; "
+            f"color: {_theme.colors['text.primary']};"
+        )
         self._status_label = QLabel("", self)
         self._status_label.setStyleSheet("background: transparent;")
         self._param_toggle_btn = QPushButton("▼ Parameters", self)
@@ -147,11 +218,12 @@ class ToolPage(QWidget):
             desc = QLabel(self._tool.description, self)
             desc.setWordWrap(True)
             desc.setStyleSheet(
-                "color: #5a6275;"
-                "border: 1px solid #e0e3ea;"
-                "border-radius: 8px;"
+                f"color: {_theme.colors['text.muted']};"
+                f"border: {_theme.shape['shape.border_width']:g}px solid "
+                f"{_theme.colors['border.subtle']};"
+                f"border-radius: {_theme.shape['shape.radius_panel']:g}px;"
                 "padding: 8px 12px;"
-                "background: #f8f9fc;"
+                f"background: {_theme.colors['bg.header']};"
             )
             root.addWidget(desc)
 
@@ -175,7 +247,11 @@ class ToolPage(QWidget):
             # going into the rich text that draws the required-field marker.
             text = escape(param.label or param.name)
             if not param.has_default:
-                lbl = QLabel(f'<span style="color:#e05252">*</span>{text}:', self._param_panel)
+                required = _theme.colors["text.required"]
+                lbl = QLabel(
+                    f'<span style="color:{required}">*</span>{text}:',
+                    self._param_panel,
+                )
             else:
                 lbl = QLabel(f'{text}:', self._param_panel)
             form_layout.addRow(lbl, w)
@@ -210,16 +286,19 @@ class ToolPage(QWidget):
         out_hdr = QHBoxLayout()
         out_hdr.setContentsMargins(0, 4, 0, 0)
         out_lbl = QLabel("Output", self)
-        out_lbl.setStyleSheet("font-weight: bold; color: #667085; font-size: 9pt; background: transparent;")
+        out_lbl.setStyleSheet(
+            f"font-weight: bold; color: {_theme.colors['text.muted']}; "
+            f"font-size: {_theme.font.small_size_pt:g}pt; background: transparent;"
+        )
         out_hdr.addWidget(out_lbl)
         out_hdr.addStretch()
         self._copy_btn = QPushButton("Copy", self)
         self._copy_btn.setFixedHeight(24)
-        self._copy_btn.setStyleSheet("padding: 0 10px; font-size: 9pt;")
+        self._copy_btn.setStyleSheet(_small_button_style(_theme))
         self._copy_btn.clicked.connect(self._copy_console)
         self._expand_btn = QPushButton("View Log", self)
         self._expand_btn.setFixedHeight(24)
-        self._expand_btn.setStyleSheet("padding: 0 10px; font-size: 9pt;")
+        self._expand_btn.setStyleSheet(_small_button_style(_theme))
         self._expand_btn.clicked.connect(self._expand_console)
         out_hdr.addWidget(self._copy_btn)
         out_hdr.addWidget(self._expand_btn)
@@ -230,11 +309,7 @@ class ToolPage(QWidget):
         self._console.setReadOnly(True)
         self._console.setMinimumHeight(120)
         self._console.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self._console.setStyleSheet(
-            "background:#1e1e1e; color:#ffffff; border-radius:6px;"
-            "font-family: Consolas, 'Microsoft YaHei', Meiryo, monospace;"
-            "font-size: 10pt;"
-        )
+        self._console.setStyleSheet(console_style())
         root.addWidget(self._console)
 
     # ── Form assist ───────────────────────────────────────────────────────────
@@ -385,7 +460,7 @@ class ToolPage(QWidget):
         self._stop_btn.setVisible(True)
         self._progress.setVisible(True)
         self._status_label.setText("Running…")
-        self._status_label.setStyleSheet(_STATUS_STYLES["running"])
+        self._status_label.setStyleSheet(_status_style("running"))
         self._set_params_readonly(True)
         self._collapse_params()
 
@@ -431,13 +506,13 @@ class ToolPage(QWidget):
 
         if status == "success":
             self._status_label.setText(f"Done ({elapsed:.1f}s)")
-            self._status_label.setStyleSheet(_STATUS_STYLES["success"])
+            self._status_label.setStyleSheet(_status_style("success"))
         elif status == "error":
             self._status_label.setText(f"Error ({elapsed:.1f}s)")
-            self._status_label.setStyleSheet(_STATUS_STYLES["error"])
+            self._status_label.setStyleSheet(_status_style("error"))
         else:
             self._status_label.setText("Cancelled")
-            self._status_label.setStyleSheet(_STATUS_STYLES["cancelled"])
+            self._status_label.setStyleSheet(_status_style("cancelled"))
 
     def _append_log(self, level: str, message: str):
         """Append one coloured line to the console.
@@ -448,7 +523,7 @@ class ToolPage(QWidget):
         """
         self._log_records.append(LogEntry(level, message))
 
-        color = LEVEL_COLORS.get(level, "#FFFFFF")
+        color = level_colors().get(level, default_color())
         fmt = QTextCharFormat()
         fmt.setForeground(QColor(color))
         if level == "CRITICAL":
