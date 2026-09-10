@@ -23,7 +23,7 @@ import pytest
 from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QApplication, QComboBox, QWidget
 
-from decoui.example import TextTools
+from decoui.example import FieldTools
 from decoui.registry import build_tree
 from decoui.storage.db import init_db, set_db_path
 from decoui.theme import Theme, builtin_themes, set_active_theme
@@ -129,7 +129,7 @@ def test_the_sidebar_selection_never_falls_back_to_qt_blue(
     """
     theme: Theme = builtin_themes()[theme_id]
     retheme_application(theme)
-    nav = NavTree(build_tree(TextTools))
+    nav = NavTree(build_tree(FieldTools))
     nav.show()
 
     palette = nav._tw.palette()
@@ -151,7 +151,7 @@ def test_a_retheme_moves_the_sidebar_selection_palette(themed: QApplication) -> 
         themed: The application, ready to be themed.
     """
     retheme_application(builtin_themes()["light"])
-    nav = NavTree(build_tree(TextTools))
+    nav = NavTree(build_tree(FieldTools))
     nav.show()
 
     retheme_application(builtin_themes()["cockpit"])

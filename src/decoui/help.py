@@ -29,6 +29,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .i18n import DEFAULT_LANGUAGE, active_language, t
+from .markup import as_markdown
+from .tool_i18n import param_text, translated
 
 #: Section headers recognised at the top level of a Google-style docstring.
 #: ``Args`` and ``Parameters`` are both accepted because the second is common
@@ -402,9 +404,22 @@ def build_tool_help(tool_info: Any, cls: type | None = None) -> ToolHelp:
         screen is worse than help that is merely brief.
     """
     parsed = parse_docstring(getattr(tool_info.method, "__doc__", None))
-    description = parsed.description
+    # Prose has two routes, and they are not equivalent. A Markdown file is the
+    # richer one -- headings, tables, code samples -- and wins when it resolves.
+    # The catalogue is for the common case this page is full of: two sentences,
+    # for which a file of its own would be more ceremony than text.
+    from_file = ""
     if cls is not None and getattr(tool_info, "help", None):
-        description = _help_file_text(cls, tool_info.help) or description
+        from_file = _help_file_text(cls, tool_info.help)
+    description = from_file or translated(
+        tool_info.tool_id, "prose", parsed.description
+    )
+    # Everything a docstring contributes to this page can be replaced by the
+    # application's catalogue, because a docstring cannot be written twice in
+    # two languages. The prose -- the paragraphs between the summary and the
+    # sections -- is the exception: that is what @tool(help="...md") is for,
+    # long-form text belonging in files a translator can work in.
+    briefs = param_text(tool_info.tool_id, "brief", parsed.args)
     params = [
         ParamHelp(
             name=param.name,
@@ -412,18 +427,24 @@ def build_tool_help(tool_info: Any, cls: type | None = None) -> ToolHelp:
             type_name=type_name(param.annotation),
             default=default_text(param),
             required=not param.has_default,
-            text=parsed.args.get(param.name, ""),
+            text=briefs.get(param.name, ""),
         )
         for param in tool_info.params
     ]
     return ToolHelp(
         tool_id=tool_info.tool_id,
         label=tool_info.label,
-        summary=parsed.summary or tool_info.description,
+        # Catalogue first, then the docstring, then the declaration. Without
+        # the first, a translated tool reads as translated in the sidebar and
+        # English in Help, which is worse than either on its own.
+        summary=translated(
+            tool_info.tool_id, "brief",
+            parsed.summary or tool_info.description,
+        ),
         description=description,
         params=params,
-        returns=parsed.returns,
-        raises=parsed.raises,
+        returns=translated(tool_info.tool_id, "returns", parsed.returns),
+        raises=translated(tool_info.tool_id, "raises", parsed.raises),
     )
 
 
@@ -440,14 +461,60 @@ def build_help(tree: list) -> list[ToolSetHelp]:
     result: list[ToolSetHelp] = []
     for toolset_info in tree:
         parsed = parse_docstring(getattr(toolset_info.cls, "__doc__", None))
+        set_id = toolset_info.cls.__name__
         result.append(ToolSetHelp(
-            set_id=toolset_info.cls.__name__,
+            set_id=set_id,
             label=toolset_info.label,
-            summary=parsed.summary,
-            description=parsed.description,
+            summary=translated(set_id, "brief", parsed.summary),
+            # A toolset has no help= of its own, so the catalogue is the only
+            # route its page's prose has.
+            description=translated(set_id, "prose", parsed.description),
             tools=[
                 build_tool_help(t, toolset_info.cls)
                 for t in toolset_info.tools
             ],
         ))
     return result
+
+
+def dump_help_pages(tree: list) -> dict[str, str]:
+    """Collect the prose of every tool's help, as Markdown ready to translate.
+
+    The catalogue in :mod:`decoui.tool_i18n` covers a tool's one-line strings.
+    It deliberately does not cover the **prose** -- the paragraphs between the
+    summary and the ``Args:`` section -- because long-form text belongs in files
+    a translator can work in. This produces those files.
+
+    Args:
+        tree: Toolsets, as :func:`decoui.registry.build_tree` returns them.
+
+    Returns:
+        File name to Markdown text, for every tool whose docstring has prose.
+        A tool that declares ``@tool(help="help/deploy.md")`` is keyed by that
+        declaration's file name, so the dump drops straight into place; one that
+        declares nothing is keyed ``<ClassName>.<method>.md`` and needs a
+        ``help=`` added before decoui will read it back.
+
+    Note:
+        Read from the **docstring**, not from whatever ``help=`` already
+        resolves to. Dumping under a Japanese interface would otherwise write
+        the Japanese file back out, which is the one thing a template must not
+        do.
+    """
+    pages: dict[str, str] = {}
+    for toolset_info in tree:
+        for tool_info in toolset_info.tools:
+            parsed = parse_docstring(getattr(tool_info.method, "__doc__", None))
+            if not parsed.description.strip():
+                continue
+            declared = getattr(tool_info, "help", None)
+            name = (
+                pathlib.PurePosixPath(declared.replace("\\", "/")).name
+                if declared
+                else f"{tool_info.tool_id}.md"
+            )
+            # Written as ordinary Markdown, not in the docstring dialect: the
+            # file is for a translator's editor, which has never heard of
+            # reST's double backticks or of Sphinx's role prefixes.
+            pages[name] = as_markdown(parsed.description.strip()) + "\n"
+    return pages

@@ -457,3 +457,25 @@ def reference(key: str, label: str, links: frozenset[str]) -> str:
     if key not in links:
         return escape(label)
     return f'<a href="{LINK_SCHEME}:{key}">{escape(label)}</a>'
+
+
+#: A reST inline literal: the double-backtick form a Python docstring uses.
+_REST_LITERAL_RE = re.compile(r"``(.+?)``", re.DOTALL)
+
+
+def as_markdown(text: str) -> str:
+    """Normalise decoui's docstring dialect to plain Markdown.
+
+    decoui reads both spellings, so this changes nothing about how a page
+    renders here. It matters on the way **out**: a ``.md`` file dumped for a
+    translator is opened in a Markdown editor, where ``` ``literal`` ``` is not
+    a code span but a code span containing a backtick, and ``:meth:`` is
+    syntax from a doc builder that editor has never heard of.
+
+    Args:
+        text: Prose in the dialect, as a docstring writes it.
+
+    Returns:
+        The same prose as ordinary Markdown.
+    """
+    return _REST_LITERAL_RE.sub(r"`\1`", _ROLE_RE.sub("", text))

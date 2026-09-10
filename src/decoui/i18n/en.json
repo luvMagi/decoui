@@ -2,6 +2,7 @@
   "language.name": "English",
 
   "common.close": "Close",
+  "common.ok": "OK",
   "common.all": "All",
   "common.none": "None",
   "common.search": "Search:",
@@ -76,7 +77,19 @@
   "settings.title": "Settings",
   "settings.theme": "Theme:",
   "settings.language": "Language:",
+  "settings.restart_title": "Restart to change the language",
+  "settings.restart_body": "decoui shows {language} the next time it starts. Everything else you changed has already been applied.",
+  "settings.restart_wait": "OK ({seconds})",
   "settings.font_family": "Font family:",
+  "settings.dump_i18n": "Dump default i18n JSON…",
+  "settings.dump_i18n_tooltip": "Write every translatable string this application declares, with the text from its own source, as a catalogue to start a translation from",
+  "settings.dump_help": "Dump default help Markdown\u2026",
+  "settings.dump_help_tooltip": "Write each tool's help prose as a Markdown file, to start a translation from. Files already in the chosen folder are left alone.",
+  "settings.dump_help_title": "Save help pages",
+  "settings.dump_help_done": "Wrote {written} file(s) to {path}. Skipped {skipped} that already existed.",
+  "settings.dump_i18n_title": "Save translation template",
+  "settings.dump_i18n_done": "Wrote {count} entries to {path}",
+  "settings.dump_i18n_failed": "Could not write the template:\n{error}",
   "settings.apply_note": "A new theme and font are applied at once. A new language takes effect after restart.",
 
   "help.title": "Help — Tool Reference",
@@ -108,6 +121,8 @@
   "startup.title": "Startup problems",
   "startup.text": "{count} startup step(s) failed.\nThe application is running without them.",
 
+  "tool_i18n.problem_source": "Translations",
+  "tool_i18n.problem_summary": "a tool translation file could not be read; the untranslated text is used",
   "theme.problem_source": "Themes",
   "theme.problem_summary": "theme loading failed; falling back to the light theme"
 }

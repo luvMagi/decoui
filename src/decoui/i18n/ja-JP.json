@@ -2,6 +2,7 @@
   "language.name": "日本語",
 
   "common.close": "閉じる",
+  "common.ok": "OK",
   "common.all": "すべて",
   "common.none": "なし",
   "common.search": "検索:",
@@ -76,6 +77,9 @@
   "settings.title": "設定",
   "settings.theme": "テーマ:",
   "settings.language": "言語:",
+  "settings.restart_title": "言語の変更には再起動が必要です",
+  "settings.restart_body": "decoui は次回の起動時に{language}で表示されます。他に変更した設定はすでに適用されています。",
+  "settings.restart_wait": "OK（{seconds}）",
 
   "help.title": "ヘルプ — ツールリファレンス",
   "help.search_placeholder": "ツール名またはグループ名で絞り込み…",

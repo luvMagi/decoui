@@ -77,7 +77,7 @@
   "shape": {
     "shape.radius_bar": 1,
     "shape.radius_small": 2,
-    "shape.radius_button": 2,
+    "shape.radius_button": 6,
     "shape.radius_control": 2,
     "shape.radius_panel": 2,
     "shape.radius_pill": 2,

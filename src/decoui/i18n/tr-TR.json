@@ -2,6 +2,7 @@
   "language.name": "Türkçe",
 
   "common.close": "Kapat",
+  "common.ok": "Tamam",
   "common.all": "Tümü",
   "common.none": "Yok",
   "common.search": "Ara:",
@@ -76,6 +77,9 @@
   "settings.title": "Ayarlar",
   "settings.theme": "Tema:",
   "settings.language": "Dil:",
+  "settings.restart_title": "Dili değiştirmek için yeniden başlatın",
+  "settings.restart_body": "decoui bir sonraki açılışta {language} dilinde görünecek. Diğer değişiklikleriniz zaten uygulandı.",
+  "settings.restart_wait": "Tamam ({seconds})",
 
   "help.title": "Yardım — Araç Başvurusu",
   "help.search_placeholder": "Araç veya grup adına göre filtrele…",

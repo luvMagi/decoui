@@ -2,6 +2,7 @@
   "language.name": "Français",
 
   "common.close": "Fermer",
+  "common.ok": "OK",
   "common.all": "Tout",
   "common.none": "Aucun",
   "common.search": "Rechercher :",
@@ -76,6 +77,9 @@
   "settings.title": "Paramètres",
   "settings.theme": "Thème :",
   "settings.language": "Langue :",
+  "settings.restart_title": "Redémarrez pour changer la langue",
+  "settings.restart_body": "decoui affichera {language} au prochain démarrage. Toutes vos autres modifications sont déjà appliquées.",
+  "settings.restart_wait": "OK ({seconds})",
 
   "help.title": "Aide — Référence des outils",
   "help.search_placeholder": "Filtrer par nom d'outil ou de groupe…",

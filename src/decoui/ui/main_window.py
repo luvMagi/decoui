@@ -221,7 +221,9 @@ class MainWindow(QMainWindow):
         window to do -- a re-theme reaches it through the same pass as any other
         window, not because it happens to be the one that opened the dialog.
         """
-        SettingsDialog(self).exec()
+        # The tree goes with it: the developer section dumps a translation
+        # template, which means reading what this application declared.
+        SettingsDialog(self, tree=self._tree).exec()
 
     def _get_instance(self, cls: type) -> object:
         """Return the shared instance for a registered toolset class."""

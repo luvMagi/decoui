@@ -750,6 +750,44 @@ signature and a file beside the module cannot be checked against it.
 
 > Full reference: [docs/help-authoring.md](docs/help-authoring.md).
 
+### Translating your own tools
+
+decoui translates *its own* interface from catalogues it ships. The labels,
+descriptions and field text **you** write into `@toolset` and `@tool` are strings
+it has never seen, so they get a catalogue of your own:
+
+```python
+gui_main(toolsets=[...], i18n_dir="i18n")     # i18n/ja-JP.json, i18n/zh-CN.json
+```
+
+Keys are `ClassName` and `ClassName.method` — the same keys a cross-reference
+uses. Every field is optional; an absent key leaves the string your source wrote,
+so a half-finished catalogue gives a half-translated interface rather than a
+broken one.
+
+```json
+{
+  "OpsTools.restore": {
+    "label": "復元",
+    "brief": "アーカイブから復元します。",
+    "returns": "復元された内容。",
+    "params": { "archive": { "label": "アーカイブ", "brief": "読み込むアーカイブ。" } }
+  }
+}
+```
+
+This cannot be done in the decorator: its arguments are evaluated at **import**,
+before `gui_main()` settles the language. decoui substitutes later, in
+`build_tree()`, which is what reaches the sidebar, the tabs, the forms, the Help
+panel and the history all at once.
+
+decoui can write the starting point for you — a catalogue holding every
+translatable string your code declares, and a Markdown file per tool holding its
+prose. Both live behind a hidden switch, off in anything you ship.
+
+> Full reference, including how to turn that switch on:
+> [docs/translating-an-application.md](docs/translating-an-application.md).
+
 ---
 
 ## Remembering Things Between Runs
@@ -849,7 +887,10 @@ History is stored at `~/.decoui/history.db` by default. Override with `db_path` 
 
 ## Example
 
-See [`src/decoui/example.py`](src/decoui/example.py) for a complete demo covering all supported widget types.
+See [`src/decoui/example/`](src/decoui/example) for a complete demo covering every
+supported feature, in three groups: [fields](src/decoui/example/fields.py),
+[running](src/decoui/example/running.py) and [form assist](src/decoui/example/assist.py).
+Run it with `python -m decoui.example`.
 
 Two tools there are worth reading as a pair before writing anything that runs for a while:
 

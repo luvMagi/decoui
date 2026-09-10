@@ -2,6 +2,7 @@
   "language.name": "Español",
 
   "common.close": "Cerrar",
+  "common.ok": "Aceptar",
   "common.all": "Todo",
   "common.none": "Ninguno",
   "common.search": "Buscar:",
@@ -76,6 +77,9 @@
   "settings.title": "Configuración",
   "settings.theme": "Tema:",
   "settings.language": "Idioma:",
+  "settings.restart_title": "Reinicia para cambiar el idioma",
+  "settings.restart_body": "decoui mostrará {language} la próxima vez que se inicie. Los demás cambios ya se han aplicado.",
+  "settings.restart_wait": "Aceptar ({seconds})",
 
   "help.title": "Ayuda — Referencia de herramientas",
   "help.search_placeholder": "Filtrar por nombre de herramienta o grupo…",

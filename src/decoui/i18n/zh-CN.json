@@ -2,6 +2,7 @@
   "language.name": "简体中文",
 
   "common.close": "关闭",
+  "common.ok": "确定",
   "common.all": "全部",
   "common.none": "无",
   "common.search": "搜索:",
@@ -76,6 +77,9 @@
   "settings.title": "设置",
   "settings.theme": "主题:",
   "settings.language": "语言:",
+  "settings.restart_title": "重启后切换语言",
+  "settings.restart_body": "decoui 将在下次启动时显示{language}。你更改的其他设置都已生效。",
+  "settings.restart_wait": "确定（{seconds}）",
 
   "help.title": "帮助 — 工具参考",
   "help.search_placeholder": "按工具名或分组名称筛选…",

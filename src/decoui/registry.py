@@ -29,6 +29,7 @@ from typing import Any, Callable, TypeAlias
 
 from .assist import DEFAULT_DEBOUNCE_MS, validate_assist_config
 from .decorators import _TOOLSET_ATTR, _TOOL_ATTR
+from .tool_i18n import param_text, translated
 from .types import F
 
 #: Parameter name -> resolved annotation, as returned by get_type_hints().
@@ -198,12 +199,19 @@ def build_tree(*toolset_classes) -> list[ToolSetInfo]:
         if meta is None:
             raise ValueError(f"{cls} is not decorated with @toolset")
 
+        # An application's own text is translated here rather than in the
+        # decorator, because a decorator's arguments are evaluated at import,
+        # before gui_main() has settled the language. Everything downstream is
+        # built from what this function returns, so one substitution reaches
+        # the sidebar, the tabs, the forms, the Help panel and the history.
+        # An application that named no i18n_dir gets the strings it wrote.
+        set_key = cls.__name__
         ts = ToolSetInfo(
             cls=cls,
-            label=meta["label"],
+            label=translated(set_key, "label", meta["label"]),
             tags=meta["tags"],
             icon=meta["icon"],
-            description=meta["description"],
+            description=translated(set_key, "description", meta["description"]),
         )
 
         for name, method in inspect.getmembers(cls, predicate=inspect.isfunction):
@@ -216,8 +224,11 @@ def build_tree(*toolset_classes) -> list[ToolSetInfo]:
             hints, annotated_hints = _resolve_hints(method)
             params: list[ParamInfo] = []
 
-            placeholders = tool_meta["placeholders"]
-            labels = tool_meta.get("labels", {})
+            tool_key = f"{cls.__name__}.{name}"
+            placeholders = param_text(
+                tool_key, "placeholder", tool_meta["placeholders"]
+            )
+            labels = param_text(tool_key, "label", tool_meta.get("labels", {}))
             for pname, param in sig.parameters.items():
                 if pname == "self":
                     continue
@@ -259,11 +270,13 @@ def build_tree(*toolset_classes) -> list[ToolSetInfo]:
             )
 
             ts.tools.append(ToolInfo(
-                tool_id=f"{cls.__name__}.{name}",
+                tool_id=tool_key,
                 method_name=name,
                 method=method,
-                label=tool_meta["label"],
-                description=tool_meta["description"],
+                label=translated(tool_key, "label", tool_meta["label"]),
+                description=translated(
+                    tool_key, "description", tool_meta["description"]
+                ),
                 help=tool_meta.get("help"),
                 icon=tool_meta["icon"],
                 confirm=tool_meta["confirm"],

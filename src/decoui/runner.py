@@ -24,7 +24,8 @@ from collections.abc import Sequence
 from typing import Callable
 
 from .decorators import _TOOL_ATTR, _TOOLSET_ATTR
-from .i18n import LANGUAGE_SETTING, set_language, t
+from .i18n import LANGUAGE_SETTING, active_language, set_language, t
+from .tool_i18n import load_catalogue
 from .theme import (
     DEFAULT_THEME_ID,
     FONT_FAMILY_SETTING,
@@ -51,6 +52,7 @@ def gui_main(
     theme: str | None = None,
     theme_dir: str | Path | None = None,
     language: str | None = None,
+    i18n_dir: str | Path | None = None,
 ) -> None:
     """Launch the decoui GUI application.
 
@@ -105,6 +107,15 @@ def gui_main(
             it. A tool's own label, description and docstring are never
             translated: they belong to the application, not to decoui.
             Defaults to English.
+        i18n_dir: Directory holding this application's **own** translations,
+            one ``<language>.json`` per language. It covers the labels,
+            descriptions and field text written into ``@toolset`` and ``@tool``
+            -- text decoui cannot translate from its own catalogues, having
+            never seen it. See :mod:`decoui.tool_i18n` for the file's shape and
+            for why it cannot be done in the decorator instead.
+
+            A missing directory, or a missing file for the running language, is
+            not an error: the strings written in the source are used.
 
     Raises:
         RuntimeError: If no @toolset class is visible in the calling namespace,
@@ -148,6 +159,17 @@ def gui_main(
     # language has to be settled before there is anything to report.
     set_language(get_setting(LANGUAGE_SETTING) or language)
     problems = _apply_startup_theme(app, theme, theme_dir)
+
+    # After the language and before the tree: build_tree() is what applies the
+    # catalogue, and it needs the language settled to know which file to read.
+    problems += [
+        StartupProblem(
+            source=t("tool_i18n.problem_source"),
+            summary=t("tool_i18n.problem_summary"),
+            detail=detail,
+        )
+        for detail in load_catalogue(i18n_dir, active_language())
+    ]
 
     tree = build_tree(*toolset_classes)
 

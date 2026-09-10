@@ -79,7 +79,7 @@
     "shape.radius_small": 0,
     "shape.radius_button": 0,
     "shape.radius_control": 0,
-    "shape.radius_panel": 0,
+    "shape.radius_panel": 8,
     "shape.radius_pill": 0,
     "shape.border_width_emphasis": 2,
     "shape.border_width_focus": 1,

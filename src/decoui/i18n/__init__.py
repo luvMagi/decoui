@@ -122,6 +122,39 @@ def active_language() -> str:
     return _ACTIVE_LANGUAGE or DEFAULT_LANGUAGE
 
 
+def t_in(language: str, key: str, /, **fields: object) -> str:
+    """Return one interface string in a named language.
+
+    Nearly every caller wants :func:`t`, which reads the running language. This
+    exists for the one case that cannot: telling a user that the language they
+    just picked needs a restart. That message has to be written in the language
+    they chose, while every other widget on screen is still in the old one, so
+    the running language cannot be moved to say it.
+
+    Args:
+        language: Catalogue to read, whether or not it is the running one.
+        key: Catalogue key, e.g. ``'tool.run'``.
+        **fields: Values for the string's ``{placeholders}``.
+
+    Returns:
+        The translated text, with the same guarantees :func:`t` documents: a key
+        missing here falls back to English, a key missing there returns itself,
+        and a string whose placeholders do not match ``fields`` is returned
+        unformatted.
+    """
+    text = _catalogue(language).get(key)
+    if text is None and language != DEFAULT_LANGUAGE:
+        text = _catalogue(DEFAULT_LANGUAGE).get(key)
+    if text is None:
+        return key
+    if not fields:
+        return text
+    try:
+        return text.format(**fields)
+    except (KeyError, IndexError, ValueError):
+        return text
+
+
 def t(key: str, /, **fields: object) -> str:
     """Return one interface string in the active language.
 
@@ -139,15 +172,4 @@ def t(key: str, /, **fields: object) -> str:
           unformatted, so a translator's typo costs one bad label rather than a
           crash in the middle of the interface
     """
-    language = active_language()
-    text = _catalogue(language).get(key)
-    if text is None and language != DEFAULT_LANGUAGE:
-        text = _catalogue(DEFAULT_LANGUAGE).get(key)
-    if text is None:
-        return key
-    if not fields:
-        return text
-    try:
-        return text.format(**fields)
-    except (KeyError, IndexError, ValueError):
-        return text
+    return t_in(active_language(), key, **fields)

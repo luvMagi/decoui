@@ -2,6 +2,7 @@
   "language.name": "Bahasa Indonesia",
 
   "common.close": "Tutup",
+  "common.ok": "OK",
   "common.all": "Semua",
   "common.none": "Tidak Ada",
   "common.search": "Cari:",
@@ -76,6 +77,9 @@
   "settings.title": "Pengaturan",
   "settings.theme": "Tema:",
   "settings.language": "Bahasa:",
+  "settings.restart_title": "Mulai ulang untuk mengubah bahasa",
+  "settings.restart_body": "decoui akan menampilkan {language} saat dijalankan berikutnya. Perubahan lain sudah diterapkan.",
+  "settings.restart_wait": "OK ({seconds})",
 
   "help.title": "Bantuan — Referensi Alat",
   "help.search_placeholder": "Filter berdasarkan nama alat atau grup…",

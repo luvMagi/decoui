@@ -21,18 +21,26 @@ dialog into a font choice the user never made.
 """
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
     QFormLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
+    QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
+from ..help import dump_help_pages
 from ..storage.db import get_setting, set_setting
+from ..tool_i18n import dump_template
 from ..i18n import (
     LANGUAGE_SETTING,
     active_language,
@@ -49,7 +57,35 @@ from ..theme import (
     discover_themes,
     parse_font_family,
 )
+from .restart_notice import RestartNoticeDialog
 from .retheme import retheme_application
+
+
+#: Settings key for developer mode. It reveals the tools that are about
+#: *maintaining* an application rather than using it -- currently the two
+#: translation-template dumps.
+#:
+#: There is deliberately **no control for it in the dialog**. Everything else in
+#: Settings is a choice decoui offers the people an application is shipped to,
+#: and a switch labelled "developer options" sitting among them is a switch
+#: shipped to them too -- one that reveals, to an end user, a button that writes
+#: files into their application's source layout.
+#:
+#: Turning it on is a deliberate act by whoever is building the application:
+#: launch once so the database exists, then set the row with any SQLite tool.
+#: See ``docs/translating-an-application.md``.
+DEVELOPER_SETTING = "decoui.developer"
+
+
+def developer_mode() -> bool:
+    """Report whether developer mode is switched on in this database.
+
+    Returns:
+        True only when the stored value is exactly ``"1"``. Anything else --
+        absent, ``"0"``, a typo -- is off, because a switch that is easy to
+        turn on by accident is not the kind of switch this should be.
+    """
+    return get_setting(DEVELOPER_SETTING) == "1"
 
 
 def _preselect(combo: QComboBox, *, stored: str | None, in_effect: str) -> None:
@@ -90,11 +126,15 @@ class SettingsDialog(QDialog):
     cannot see.
     """
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None, tree: list | None = None) -> None:
         """Build the dialog and preselect the stored theme, font and language.
 
         Args:
             parent: Qt parent, used to centre the dialog over the window.
+            tree: The loaded toolsets, needed only by the developer section --
+                dumping a translation template means reading what the
+                application declared. None hides that section, which is what a
+                caller with no tree in hand should get.
         """
         super().__init__(parent)
         self.setWindowTitle(t("settings.title"))
@@ -166,6 +206,22 @@ class SettingsDialog(QDialog):
         form.addRow(t("settings.font_family"), self._font)
         form.addRow(t("settings.language"), self._language)
 
+        self._tree = tree
+        # Two dumps, because the text divides in two: the catalogue holds a
+        # tool's one-line strings, and Markdown files hold its prose. See
+        # decoui.tool_i18n for why that division exists.
+        self._dump_btn = QPushButton(t("settings.dump_i18n"), self)
+        self._dump_btn.setToolTip(t("settings.dump_i18n_tooltip"))
+        self._dump_btn.clicked.connect(self._dump_translation_template)
+
+        self._dump_help_btn = QPushButton(t("settings.dump_help"), self)
+        self._dump_help_btn.setToolTip(t("settings.dump_help_tooltip"))
+        self._dump_help_btn.clicked.connect(self._dump_help_pages)
+
+        # Nothing to read the strings out of means nothing to dump.
+        for button in (self._dump_btn, self._dump_help_btn):
+            button.setEnabled(tree is not None)
+
         # Permanent, not a reaction to changing the selection: the user should
         # know which of the two waits for a restart *before* they choose, not
         # after.
@@ -182,8 +238,12 @@ class SettingsDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.addLayout(form)
         layout.addWidget(note)
+        layout.addWidget(self._dump_btn)
+        layout.addWidget(self._dump_help_btn)
         layout.addStretch()
         layout.addWidget(buttons)
+
+        self._show_developer_tools(developer_mode())
 
     def selected_theme_id(self) -> str:
         """Return the theme id currently shown in the combo box.
@@ -219,6 +279,99 @@ class SettingsDialog(QDialog):
             own stack alone".
         """
         return parse_font_family(self._font.text())
+
+    def _show_developer_tools(self, enabled: bool) -> None:
+        """Show or hide the developer section.
+
+        Args:
+            enabled: Whether developer mode is on.
+        """
+        self._dump_btn.setVisible(enabled)
+        self._dump_help_btn.setVisible(enabled)
+        # The dialog was sized for the smaller of the two layouts, and Qt does
+        # not shrink a window back on its own when a widget is hidden.
+        self.adjustSize()
+
+    def _dump_translation_template(self) -> None:
+        """Write out every translatable string this application declares.
+
+        The file is a catalogue in the shape :mod:`decoui.tool_i18n` reads, with
+        the application's **own** text as every value -- the labels and
+        descriptions from its decorators, the summaries, parameter descriptions,
+        Returns and Raises from its docstrings, and the field text from ``F`` on
+        its annotations. A translator overwrites the values.
+
+        It is written from the declarations rather than from the running tree,
+        so dumping while a translation is loaded still produces the source text.
+        See :func:`decoui.tool_i18n.dump_template`.
+        """
+        if self._tree is None:
+            return
+        path, _filter = QFileDialog.getSaveFileName(
+            self, t("settings.dump_i18n_title"), "en.json", "JSON (*.json)"
+        )
+        if not path:
+            return
+
+        try:
+            template = dump_template(self._tree)
+            Path(path).write_text(
+                json.dumps(template, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+        except (OSError, UnicodeEncodeError) as exc:
+            QMessageBox.warning(
+                self,
+                t("settings.dump_i18n_title"),
+                t("settings.dump_i18n_failed", error=exc),
+            )
+            return
+
+        QMessageBox.information(
+            self,
+            t("settings.dump_i18n_title"),
+            t("settings.dump_i18n_done", count=len(template), path=path),
+        )
+
+    def _dump_help_pages(self) -> None:
+        """Write each tool's help prose into a folder, as Markdown.
+
+        A file already in the folder is **left alone** and counted as skipped.
+        The obvious place to dump is the folder the application already keeps
+        its help in, and a hand-written page there is worth more than the
+        docstring paragraph this would replace it with.
+        """
+        if self._tree is None:
+            return
+        directory = QFileDialog.getExistingDirectory(
+            self, t("settings.dump_help_title")
+        )
+        if not directory:
+            return
+
+        written = skipped = 0
+        try:
+            for name, text in dump_help_pages(self._tree).items():
+                path = Path(directory) / name
+                if path.exists():
+                    skipped += 1
+                    continue
+                path.write_text(text, encoding="utf-8")
+                written += 1
+        except (OSError, UnicodeEncodeError) as exc:
+            QMessageBox.warning(
+                self,
+                t("settings.dump_help_title"),
+                t("settings.dump_i18n_failed", error=exc),
+            )
+            return
+
+        QMessageBox.information(
+            self,
+            t("settings.dump_help_title"),
+            t("settings.dump_help_done",
+              written=written, skipped=skipped, path=directory),
+        )
 
     def selected_language(self) -> str:
         """Return the language code currently shown in the combo box.
@@ -266,4 +419,17 @@ class SettingsDialog(QDialog):
         ):
             retheme_application(theme)
 
+        # Compared against what is *running*, not against what was stored. The
+        # two disagree in exactly the case this test exists for: a user who
+        # picked a language last session and has not restarted since is offered
+        # that stored choice, and switching back to the one already on screen
+        # needs no restart at all. Comparing against the stored value would
+        # announce one anyway.
+        needs_restart = language != active_language()
+
         super().accept()
+
+        if needs_restart:
+            # Written in the language just chosen, and shown after this dialog
+            # has closed so the notice stands on its own over the main window.
+            RestartNoticeDialog(language, self.parentWidget()).exec()

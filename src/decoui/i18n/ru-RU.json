@@ -2,6 +2,7 @@
   "language.name": "Русский",
 
   "common.close": "Закрыть",
+  "common.ok": "ОК",
   "common.all": "Все",
   "common.none": "Нет",
   "common.search": "Поиск:",
@@ -76,6 +77,9 @@
   "settings.title": "Настройки",
   "settings.theme": "Тема:",
   "settings.language": "Язык:",
+  "settings.restart_title": "Перезапустите, чтобы сменить язык",
+  "settings.restart_body": "decoui отобразит {language} при следующем запуске. Остальные изменения уже применены.",
+  "settings.restart_wait": "ОК ({seconds})",
 
   "help.title": "Справка — Справочник по инструментам",
   "help.search_placeholder": "Фильтр по названию инструмента или группы…",
