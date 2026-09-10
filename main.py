@@ -21,7 +21,13 @@ from decoui import gui_main
 from decoui.example import AssistTools, DemoTools, NumberTools, TextTools
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    # DEBUG, not INFO: decoui attaches its console handler to the root logger
+    # but never changes that logger's level, and an unconfigured root logger
+    # filters at WARNING. Whatever level is set here is the floor for what a
+    # tool's logging.* calls can reach the output console -- at INFO the
+    # example's own logging.debug lines would be dropped before decoui ever
+    # sees them.
+    logging.basicConfig(level=logging.DEBUG)
     gui_main(
         title="decoui Examples",
         db_path="history.db",
