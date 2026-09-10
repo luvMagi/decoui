@@ -42,7 +42,7 @@ from .log_window import LogWindow
 _STATUS_ICONS: dict[str, tuple[str, str]] = {
     "success": ("status-success", "success"),
     "error": ("status-error", "danger"),
-    "running": ("status-running", "accent"),
+    "running": ("status-running", "running"),
     "cancelled": ("status-cancelled", "neutral"),
 }
 

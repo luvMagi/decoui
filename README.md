@@ -607,11 +607,11 @@ The token groups:
 | Group | Count | Covers |
 |---|---|---|
 | `bg.*` | 21 | every surface separately -- app, page, top bar, tabs, sidebar, tool list, fields, buttons, table, console |
-| `text.*` | 14 | one ink per place text sits, including `text.on_sidebar` (a dark tool list), `text.on_topbar` (a dark top bar), and `text.on_success` / `on_danger` / `on_neutral` so a bright Run button can take dark text while Stop stays dark and takes light text |
-| `border.*` | 9 | panels, fields, buttons, tabs, focus, and the console's frame |
-| `console.*` | 6 | one colour per log level, so a light console is possible at all |
-| `accent` · `success` · `danger` · `neutral` · `scrollbar.*` | 9 | selections and the semantic fills |
-| `shape.*` | 8 | five corner radii, two border widths, and `border_style` -- Qt's `outset` / `inset` / `ridge` / `groove` draw a bevel from the border colour, which is as close to a raised panel as a flat format gets. Set the radii to `0` to square everything off. |
+| `text.*` | 16 | one ink per place text sits, including `text.on_sidebar` (a dark tool list), `text.on_topbar` (a dark top bar), and `text.on_running` / `on_success` / `on_danger` / `on_neutral` so a bright Run button can take dark text while Stop stays dark and takes light text |
+| `border.*` | 10 | panels, fields, buttons, tabs, the cap on the current tab, focus, and the console's frame |
+| `console.*` | 12 | a formatted line is inked in three parts -- `console.timestamp`, then `console.tag.<level>` for the level itself and `console.body.<level>` for the message. `console.plain` covers a line that carries no level at all, such as raw `print()` output. Set a level's tag and body to one value to tint the whole line |
+| `accent` · `running` · `success` · `danger` · `neutral` · `scrollbar.*` | 11 | selections and the semantic fills. `running` is separate from `accent` because `accent` also fills every checked button: a theme that wants its toggles and its Run button in one colour would otherwise get a Running badge identical to the Done one |
+| `shape.*` | 14 | six corner radii, and border widths and styles grouped the way the colours are -- `_panel` / `_control` / `_field`, plus `_emphasis` and `_focus` -- so a theme can bevel its buttons without bevelling its tables. Qt's `outset` / `inset` / `ridge` / `groove` draw a bevel from the border colour, which is as close to a raised panel as a flat format gets; `double` needs a width of at least 3 before two lines fit. Set the radii to `0` to square everything off. |
 | `font.*` | 8 | `family` / `size_pt` / `letter_spacing`, `mono_family` / `mono_size_pt` for the console, `title_size_px` / `small_size_pt` for headings and secondary controls, and `uppercase` to render tags, tabs and buttons in capitals |
 
 Font families are **stacks**: Qt falls through them in order, so end every one with
