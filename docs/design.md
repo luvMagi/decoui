@@ -127,6 +127,11 @@ def merge(self, files: list, output: str = "out.csv") -> str:
 | `labels` | `dict[str,str]` | `{}` | Form label for named parameters. Defaults to the parameter name. |
 | `confirm` | `bool` | `False` | Show Yes/No dialog before executing. |
 | `timeout` | `int\|None` | `None` | Execution timeout in seconds. |
+| `on_cancel` | `callable\|str` | `None` | Cleanup run on the GUI thread when the tool is cancelled. See [6.2](#62-cancellation). |
+
+Keys in `placeholders`, `labels`, `completions`, `cascade` and `defaults` are validated against the
+method signature in `build_tree()`, not in the decorator — a tool called directly, without a GUI,
+must not be blocked by form-text validation.
 
 **Return values** from tool methods are intentionally ignored by the GUI. Use `print()` or `logging` for any output.
 
@@ -290,22 +295,85 @@ ExecutionEngine.run(tool, instance, params)
       ├── ToolWorker(QRunnable)
       │       ├── redirect sys.stdout → _StreamRedirect → log_line signal
       │       ├── attach _SignalHandler to root logger → log_line signal
+      │       ├── publish signals on worker._thread_local → progress() finds them
       │       ├── call tool.method(instance, **params)
+      │       ├── clear _thread_local (finally; QThreadPool reuses threads)
       │       └── emit finished(result, status)
       └── QThreadPool.globalInstance().start(worker)
 
 On finished:
       ├── UPDATE ExecutionRecord (status, finished_at)
       ├── flush remaining log buffer
+      ├── drop the worker reference (closes the late-cancel window)
       └── update UI (status badge, buttons)
 ```
 
-### 6.2 Log Batch Writing
+### 6.2 Cancellation
+
+```
+User clicks Stop (or timeout fires)
+      │
+      ▼  GUI thread
+ExecutionEngine.cancel()
+      ├── _run_cancel_hook()          ← tool's on_cancel, on every attempt
+      │       └── errors → ERROR log line; cancellation continues
+      └── ToolWorker.cancel()
+              └── PyThreadState_SetAsyncExc(_WorkerCancelled)
+```
+
+The order is the design. `PyThreadState_SetAsyncExc` schedules an exception that
+CPython raises at the next bytecode boundary — a worker parked inside a C call
+(`proc.wait()`, `socket.recv()`) reaches no such boundary until that call returns
+on its own, and neither does its `finally`. Running the hook first, on the GUI
+thread, while the worker is still blocked, is the only point at which the thing
+holding the worker can be released.
+
+Two consequences worth knowing:
+
+- The hook runs **concurrently** with the tool body. It is contractually limited
+  to idempotent interruption, must tolerate not-yet-assigned state, and must be
+  fast — it is on the GUI thread.
+- The injection can land between `waitpid()` returning and `Popen` recording the
+  status, so a cancelled tool's `Popen.returncode` may stay `None` even though
+  the child is reaped. Do not read a child's fate through `Popen` after a cancel.
+
+The hook fires on **every** cancellation attempt, not once per execution. This is
+deliberate: a Stop that arrives before the tool has assigned the state its hook
+reads does nothing, and the worker is still blocked in the call only the hook can
+release — a second Stop has to be able to retry. Idempotence is what makes that
+safe, which is why it is part of the hook's contract rather than an optimisation.
+
+What bounds the hook instead is the run's own lifetime. `cancel()` returns early
+when `_worker` is None, and `_on_finished` both drops `_worker` and stops the
+timeout timer, so nothing can invoke cleanup for work that already completed. The
+timeout timer is owned by the engine and re-armed per run, rather than a
+fire-and-forget `QTimer.singleShot`: a single-shot armed by a finished run cannot
+be recalled, and would cancel whichever run happened to be in flight when it
+eventually fired.
+
+### 6.3 Progress
+
+`decoui.progress(done, total, message)` is a module-level function, not a method
+on a base class: tools are verified by instantiating the toolset and calling the
+method directly, so nothing may require framework state to exist.
+
+It reads `worker._thread_local.signals`, which `ToolWorker.run()` publishes for
+the duration of the call. Outside a worker that lookup returns `None` and the
+call is a no-op — no output, no warning.
+
+Reports closer than `_PROGRESS_MIN_INTERVAL_S` (100 ms) are dropped, since a
+queued cross-thread signal per loop iteration would outrun the GUI. A final
+report (`done >= total > 0`) is never dropped, so the bar always lands on 100%.
+
+Progress is transient UI state: `ExecutionEngine` re-emits it and **does not**
+write it to `execution_log`.
+
+### 6.4 Log Batch Writing
 
 - Buffer up to **50 lines** or **1 second** (whichever comes first), then `executemany` INSERT.
 - Force-flush on `finished` signal before updating the record.
 
-### 6.3 Log Level Colours
+### 6.5 Log Level Colours
 
 | Source / Level | Console Colour |
 |---|---|

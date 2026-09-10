@@ -1,4 +1,18 @@
-"""gui_main() entry point."""
+"""gui_main() entry point.
+
+One call starts the whole application: it finds the toolsets, validates their
+declarations, builds the tree, creates one instance of each, runs the startup
+hooks and shows the window. It does not return -- it ends in ``sys.exit()``.
+
+The startup order is fixed and documented on :func:`gui_main`; the important
+consequence is that ``__init__`` and ``on_startup()`` both run **before** the
+event loop starts, so neither may wait on a timer, a signal or a worker thread.
+See ``docs/startup-lifecycle.md``.
+
+Failures during startup are collected rather than fatal: a toolset that cannot
+be constructed is dropped, everything else stays usable, and all the failures
+are reported together in one dialog over the window.
+"""
 from __future__ import annotations
 
 import inspect
@@ -6,6 +20,7 @@ import sys
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
+from collections.abc import Sequence
 from typing import Callable
 
 from .decorators import _TOOL_ATTR, _TOOLSET_ATTR
@@ -17,10 +32,12 @@ def gui_main(
     title: str = "decoui",
     db_path: str | Path | None = None,
     on_startup: Callable[[], None] | None = None,
+    toolsets: Sequence[type] | None = None,
 ) -> None:
     """Launch the decoui GUI application.
 
-    Auto-discovers all @toolset classes visible in the caller's global scope.
+    Auto-discovers all @toolset classes visible in the caller's global scope,
+    unless ``toolsets`` names them explicitly.
 
     Startup runs in a fixed order, so anything loaded early is available later:
 
@@ -47,27 +64,40 @@ def gui_main(
             before any toolset instance exists, so it cannot write to ``self``
             -- to load data a single toolset owns, give that class its own
             ``on_startup()`` method instead.
+        toolsets: The @toolset classes to load. When given, the calling
+            namespace is not scanned at all, so imports exist only for the
+            classes named here and need no ``# noqa: F401``. When omitted,
+            every @toolset class visible to the caller is discovered.
+
+            The list order does not reach the navigation tree: build_tree()
+            sorts toolsets and tools by label. Pass an explicit list to
+            control *what* loads, not what order it appears in.
 
     Raises:
-        RuntimeError: If no @toolset class is visible in the calling namespace.
+        RuntimeError: If no @toolset class is visible in the calling namespace,
+            or if ``toolsets`` is an empty sequence.
+        TypeError: If ``toolsets`` holds anything that is not a @toolset class.
     """
     if db_path is not None:
         set_db_path(Path(db_path))
 
-    # Walk up the call stack to find the first frame outside this module,
-    # then collect every class decorated with @toolset from that namespace.
-    caller_globals = _caller_globals()
-    toolset_classes = [
-        obj
-        for obj in caller_globals.values()
-        if isinstance(obj, type) and hasattr(obj, _TOOLSET_ATTR)
-    ]
+    if toolsets is None:
+        # Walk up the call stack to find the first frame outside this module,
+        # then collect every class decorated with @toolset from that namespace.
+        caller_globals = _caller_globals()
+        toolset_classes = [
+            obj
+            for obj in caller_globals.values()
+            if isinstance(obj, type) and hasattr(obj, _TOOLSET_ATTR)
+        ]
 
-    if not toolset_classes:
-        raise RuntimeError(
-            "gui_main() found no @toolset classes in the calling namespace. "
-            "Make sure to import them before calling gui_main()."
-        )
+        if not toolset_classes:
+            raise RuntimeError(
+                "gui_main() found no @toolset classes in the calling namespace. "
+                "Make sure to import them before calling gui_main()."
+            )
+    else:
+        toolset_classes = _check_explicit_toolsets(toolsets)
 
     from PySide6.QtGui import QFont, QIcon
     from PySide6.QtWidgets import QApplication
@@ -97,6 +127,38 @@ def gui_main(
     _show_startup_problems(problems, window)
 
     sys.exit(app.exec())
+
+
+def _check_explicit_toolsets(toolsets: Sequence[type]) -> list[type]:
+    """Validate the explicit toolsets list handed to gui_main().
+
+    Args:
+        toolsets: The sequence passed as ``gui_main(toolsets=...)``.
+
+    Returns:
+        The same classes as a list, in the caller's order.
+
+    Raises:
+        RuntimeError: If the sequence is empty. This is kept distinct from the
+            auto-discovery failure so the message can say which one happened.
+        TypeError: If an entry is not a class decorated with @toolset.
+    """
+    toolset_classes = list(toolsets)
+    if not toolset_classes:
+        raise RuntimeError(
+            "gui_main(toolsets=[]) was given an empty list. Pass the @toolset "
+            "classes to load, or omit the argument to discover them from the "
+            "calling namespace."
+        )
+
+    for candidate in toolset_classes:
+        if not (isinstance(candidate, type) and hasattr(candidate, _TOOLSET_ATTR)):
+            name = getattr(candidate, "__name__", repr(candidate))
+            raise TypeError(
+                f"gui_main(toolsets=...) got {name}, which is not decorated "
+                f"with @toolset"
+            )
+    return toolset_classes
 
 
 @dataclass(frozen=True)
@@ -505,6 +567,14 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
 
 
 def _apply_fonts(app) -> None:
+    """Set the application font to the first available CJK-capable UI face.
+
+    The families are tried in order and Qt falls back through them, so the same
+    stylesheet renders on Windows, macOS and Linux without per-platform code.
+
+    Args:
+        app: The QApplication to configure.
+    """
     from PySide6.QtGui import QFont
     ui_font = QFont()
     ui_font.setFamilies(["Microsoft YaHei", "Meiryo", "Segoe UI", "sans-serif"])
@@ -513,6 +583,11 @@ def _apply_fonts(app) -> None:
 
 
 def _apply_theme(app) -> None:
+    """Install the light stylesheet shared by every decoui window.
+
+    Args:
+        app: The QApplication to configure.
+    """
     app.setStyleSheet(_APP_STYLESHEET)
 
 
