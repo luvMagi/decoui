@@ -65,13 +65,18 @@ class ExecutionEngine(QObject):
         self._worker: ToolWorker | None = None
         self._tool_info: ToolInfo | None = None
         self._instance: Any = None
-        self._cancel_hook_fired: bool = False
         self._record_id: int = 0
         self._log_buffer: list[ExecutionLog] = []
         self._log_seq = 0
         self._flush_timer = QTimer(self)
         self._flush_timer.setInterval(1000)
         self._flush_timer.timeout.connect(self._flush_logs)
+        # Owned rather than fire-and-forget: a QTimer.singleShot armed by a run
+        # that has already ended cannot be called back, and would go on to
+        # cancel whatever run happens to be in flight when it finally fires.
+        self._timeout_timer = QTimer(self)
+        self._timeout_timer.setSingleShot(True)
+        self._timeout_timer.timeout.connect(self._on_timeout)
 
     def run(self, tool_info: ToolInfo, instance, params: dict):
         """Record the run, start the worker, and arm the timeout.
@@ -91,7 +96,6 @@ class ExecutionEngine(QObject):
         now = datetime.now()
         self._tool_info = tool_info
         self._instance = instance
-        self._cancel_hook_fired = False
         serialized_params = self._serialize_params(tool_info, params)
         rec = ExecutionRecord(
             tool_id=tool_info.tool_id,
@@ -114,8 +118,11 @@ class ExecutionEngine(QObject):
         self._flush_timer.start()
         QThreadPool.globalInstance().start(self._worker)
 
+        # Unconditional, so a tool declaring no timeout is never cut short by
+        # the timer a previous run left armed.
+        self._timeout_timer.stop()
         if tool_info.timeout:
-            QTimer.singleShot(tool_info.timeout * 1000, self._on_timeout)
+            self._timeout_timer.start(tool_info.timeout * 1000)
 
     def cancel(self):
         """Stop the running tool, giving it a chance to clean up first.
@@ -133,19 +140,24 @@ class ExecutionEngine(QObject):
         self._worker.cancel()
 
     def _run_cancel_hook(self):
-        """Run the tool's on_cancel declaration, at most once per execution.
+        """Run the tool's on_cancel declaration.
+
+        Runs on every cancellation attempt, not once per execution. The hook is
+        contractually idempotent, and a second Stop is the only way out of the
+        case where the first one arrived too early to do anything: a hook that
+        found its state not yet assigned did nothing, and the worker is still
+        blocked in the call that only the hook can release.
 
         A hook that raises is reported into the run's own log: cancellation has
         to complete either way, and the Stop button is not a place to surface a
         traceback.
         """
-        if self._cancel_hook_fired or self._tool_info is None:
+        if self._tool_info is None:
             return
         spec = self._tool_info.on_cancel
         if spec is None:
             return
 
-        self._cancel_hook_fired = True
         target = getattr(self._instance, spec) if isinstance(spec, str) else spec
         try:
             target()
@@ -186,8 +198,10 @@ class ExecutionEngine(QObject):
         """
         self._flush_timer.stop()
         self._flush_logs()
-        # Dropping the worker closes the window in which a late timeout, or a
-        # second Stop, could fire the cancel hook after the tool already ended.
+        # Disarming the timeout and dropping the worker together close the
+        # window in which a late timeout, or a Stop pressed after the tool
+        # already ended, could fire the cancel hook.
+        self._timeout_timer.stop()
         self._worker = None
         result_json = None
         if result is not None:
@@ -207,8 +221,10 @@ class ExecutionEngine(QObject):
         """Cancel the run when its declared timeout expires.
 
         Goes through :meth:`cancel`, so a timeout runs the tool's ``on_cancel``
-        hook exactly as pressing Stop does. Does nothing once the run has ended,
-        because the worker reference is dropped in :meth:`_on_finished`.
+        hook exactly as pressing Stop does. Does nothing once the run has ended:
+        :meth:`_on_finished` stops the timer and drops the worker, and
+        :meth:`run` re-arms it, so this can only ever fire for the run that
+        armed it.
         """
         if self._worker:
             self.cancel()

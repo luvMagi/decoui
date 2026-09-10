@@ -396,14 +396,17 @@ class ToolPage(QWidget):
 
         Args:
             done: Units completed so far.
-            total: Total units, or 0 when unknown. 0 keeps the bar in its
-                indeterminate state so a tool that only sends messages does not
-                pin the bar at zero.
+            total: Total units, or 0 when unknown. 0 returns the bar to its
+                indeterminate sweep, so a tool that finishes a counted phase and
+                moves on to an unbounded one does not leave the bar frozen at
+                the last percentage.
             message: Status text, shown in place of "Running…" when non-empty.
         """
         if total > 0:
             self._progress.setRange(0, total)
             self._progress.setValue(done)
+        else:
+            self._progress.setRange(0, 0)
         if message:
             self._status_label.setText(message)
 

@@ -641,6 +641,11 @@ class DemoTools:
 
             returncode = child.wait()
 
+        # Cleared so the next run's "not started yet" case stays distinguishable
+        # from this run's "already finished" one. Leaving the exited Popen here
+        # would let a Stop pressed early in the next run inspect the wrong
+        # process, find it dead, and terminate nothing.
+        self._child = None
         return f"Child exited with {returncode} after {ticks} tick(s)."
 
     def stop_child(self) -> None:

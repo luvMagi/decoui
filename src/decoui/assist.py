@@ -971,6 +971,7 @@ def validate_assist_config(
     tool_label: str,
     cls: type,
     params: list[Any],
+    *,
     placeholders: dict[str, str],
     labels: dict[str, str],
     completions: dict[str, Any],
@@ -1029,7 +1030,10 @@ def validate_assist_config(
             )
         if isinstance(spec, (list, tuple)):
             continue
-        _check_callable_spec(tool_label, cls, f"completions['{name}']", spec)
+        _check_callable_spec(
+            tool_label, cls, f"completions['{name}']", spec,
+            allowed="a list, a callable, or a method name",
+        )
 
     for name, spec in cascade.items():
         if name not in known:
@@ -1052,10 +1056,15 @@ def validate_assist_config(
                     f"'{name}'; available: {available}"
                 )
         return
-    _check_callable_spec(tool_label, cls, "defaults", defaults)
+    _check_callable_spec(
+        tool_label, cls, "defaults", defaults,
+        allowed="a dict, a callable, or a method name",
+    )
 
 
-def _check_callable_spec(tool_label: str, cls: type, where: str, spec: Any) -> None:
+def _check_callable_spec(
+    tool_label: str, cls: type, where: str, spec: Any, allowed: str = "a callable or a method name"
+) -> None:
     """Verify that a callback spec is callable or names a class method.
 
     Args:
@@ -1063,6 +1072,8 @@ def _check_callable_spec(tool_label: str, cls: type, where: str, spec: Any) -> N
         cls: The toolset class the method name is looked up on.
         where: Human-readable location, e.g. ``cascade['service']``.
         spec: The declared spec.
+        allowed: What the caller accepts, quoted back in the TypeError. Only
+            ``completions`` also takes a plain list, so the default omits it.
 
     Raises:
         TypeError: If the spec is neither a string nor callable.
@@ -1083,8 +1094,8 @@ def _check_callable_spec(tool_label: str, cls: type, where: str, spec: Any) -> N
         return
     if not callable(spec):
         raise TypeError(
-            f"@tool('{tool_label}') {where} must be a list, a callable, or a method "
-            f"name; got {type(spec).__name__}"
+            f"@tool('{tool_label}') {where} must be {allowed}; "
+            f"got {type(spec).__name__}"
         )
 
 

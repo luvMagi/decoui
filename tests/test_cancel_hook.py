@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 import threading
@@ -60,6 +59,10 @@ class _CancelTools:
     def with_broken_hook(self) -> None:
         """Placeholder body for the failing-hook path."""
 
+    @tool(label="Timed", timeout=60, on_cancel="stop")
+    def timed(self) -> None:
+        """Placeholder body for the timeout-timer tests."""
+
     def stop(self) -> None:
         """Record the hook call and the thread it ran on."""
         self.order.append("hook")
@@ -87,6 +90,19 @@ def _engine(tmp_path: Path) -> ExecutionEngine:
     return ExecutionEngine()
 
 
+def _tool_of(cls: type, method_name: str):
+    """Look one tool up by method name.
+
+    Args:
+        cls: The @toolset class to scan.
+        method_name: The attribute name of the wanted tool.
+
+    Returns:
+        Its ToolInfo.
+    """
+    return next(t for t in build_tree(cls)[0].tools if t.method_name == method_name)
+
+
 def _armed(
     tmp_path: Path, method_name: str, instance: _CancelTools
 ) -> tuple[ExecutionEngine, list[str]]:
@@ -101,12 +117,8 @@ def _armed(
         The engine and the shared call-order log.
     """
     engine = _engine(tmp_path)
-    info = next(
-        t for t in build_tree(_CancelTools)[0].tools if t.method_name == method_name
-    )
-    engine._tool_info = info
+    engine._tool_info = _tool_of(_CancelTools, method_name)
     engine._instance = instance
-    engine._cancel_hook_fired = False
     engine._worker = _FakeWorker(instance.order)
     return engine, instance.order
 
@@ -134,14 +146,75 @@ def test_hook_runs_on_the_calling_thread(tmp_path: Path) -> None:
     assert instance.hook_thread == threading.current_thread().name
 
 
-def test_hook_fires_once_for_repeated_cancels(tmp_path: Path) -> None:
-    """Verify a second Stop press does not run cleanup twice."""
+def test_a_second_stop_retries_the_hook(tmp_path: Path) -> None:
+    """Verify repeated Stop presses each get a fresh attempt at cleanup.
+
+    A Stop that arrives before the tool has assigned the state its hook reads
+    does nothing, and the worker is still blocked in the call only the hook can
+    release. Suppressing the retry would leave the page wedged for the rest of
+    the child's life, so the hook is contractually idempotent instead.
+    """
     engine, order = _armed(tmp_path, "with_hook", _CancelTools())
 
     engine.cancel()
     engine.cancel()
 
-    assert order.count("hook") == 1
+    assert order == ["hook", "interrupt", "hook", "interrupt"]
+
+
+def test_the_hook_does_not_fire_once_the_run_has_ended(tmp_path: Path) -> None:
+    """Verify cleanup is bounded by the run, not by a once-only flag.
+
+    ``_on_finished`` drops the worker, which is what closes the window: a Stop
+    pressed afterwards must not run cleanup against work that already completed.
+    """
+    engine, order = _armed(tmp_path, "with_hook", _CancelTools())
+
+    engine._on_finished(None, "success")
+    engine.cancel()
+
+    assert order == []
+
+
+def test_a_finished_run_disarms_its_timeout(
+    qt_app: QApplication, tmp_path: Path
+) -> None:
+    """Verify the timeout timer does not outlive the run that armed it."""
+    engine = _engine(tmp_path)
+
+    engine.run(_tool_of(_CancelTools, "timed"), _CancelTools(), {})
+    assert engine._timeout_timer.isActive()
+
+    assert QThreadPool.globalInstance().waitForDone(10_000)
+    qt_app.processEvents()
+
+    assert not engine._timeout_timer.isActive()
+
+
+def test_a_later_run_is_not_cut_short_by_an_earlier_timeout(
+    qt_app: QApplication, tmp_path: Path
+) -> None:
+    """Verify a run inherits no timeout from the run before it.
+
+    A fire-and-forget QTimer.singleShot cannot be recalled, so a timer armed by
+    a finished run would fire against whatever is running when its deadline
+    arrives -- cancelling it, writing a bogus timeout warning into its record,
+    and invoking its on_cancel hook.
+    """
+    engine = _engine(tmp_path)
+    instance = _CancelTools()
+
+    engine.run(_tool_of(_CancelTools, "timed"), instance, {})
+    assert QThreadPool.globalInstance().waitForDone(10_000)
+    qt_app.processEvents()
+
+    # 'No hook' declares no timeout at all, so nothing may be armed for it.
+    engine.run(_tool_of(_CancelTools, "without_hook"), instance, {})
+    assert not engine._timeout_timer.isActive()
+
+    assert QThreadPool.globalInstance().waitForDone(10_000)
+    qt_app.processEvents()
+    assert instance.order == []
 
 
 def test_timeout_fires_the_hook(tmp_path: Path) -> None:
@@ -263,14 +336,20 @@ def test_cancel_terminates_a_blocking_child_process(
     assert QThreadPool.globalInstance().waitForDone(10_000)
     assert time.monotonic() - started < 20.0
 
-    # The child is gone, and reaped: kill(pid, 0) still succeeds on a zombie,
-    # so this also proves the worker's waitpid() collected it.
-    with pytest.raises(ProcessLookupError):
-        os.kill(instance.proc.pid, 0)
-
-    # Popen.returncode stays None even so. The injected exception is raised at
-    # the first bytecode boundary after waitpid() returns, which falls inside
-    # Popen._wait, before it records the status. Cancellation leaves the Popen
-    # object unusable -- read the child through the OS, not through Popen.
+    # Popen.returncode is still None. The injected exception is raised at the
+    # first bytecode boundary after the wait syscall returns, which falls inside
+    # Popen._wait, before it records the status -- so the cached attribute never
+    # gets written. Read the child's state, do not trust this attribute.
     assert instance.proc.returncode is None
+
+    # Asking the OS is what actually proves the child is gone. poll() is the
+    # portable way to do it: on Windows it reads the exit code through the
+    # handle Popen still holds, and on POSIX it either reaps the child itself or
+    # gets ECHILD because the worker's wait already did. Both give a non-None
+    # answer only once the child has really ended.
+    #
+    # os.kill(pid, 0) does not work here: on Windows the pid stays openable for
+    # as long as Popen holds a handle to the exited process, so it succeeds for
+    # a dead child instead of raising ProcessLookupError.
+    assert instance.proc.poll() is not None
     qt_app.processEvents()

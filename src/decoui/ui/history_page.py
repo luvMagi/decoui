@@ -47,7 +47,6 @@ def _format_size(num_bytes: int) -> str:
     Returns:
         The size with a unit suffix, e.g. ``'1.2 MB'``.
     """
-    """Render a byte count as a short human-readable string."""
     size = float(num_bytes)
     for unit in ("B", "KB", "MB", "GB"):
         if size < 1024 or unit == "GB":

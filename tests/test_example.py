@@ -140,13 +140,14 @@ def test_cancelling_the_child_process_tool_kills_the_child(
     while instance._child is None and time.monotonic() < deadline:
         time.sleep(0.01)
     assert instance._child is not None
-    pid = instance._child.pid
+    child = instance._child
 
     engine.cancel()
 
     assert QThreadPool.globalInstance().waitForDone(10_000)
     assert time.monotonic() - started < 20.0
-    # Gone *and* reaped: kill(pid, 0) still succeeds on a zombie.
-    with pytest.raises(ProcessLookupError):
-        os.kill(pid, 0)
+    # The child really ended, rather than the worker merely giving up on it.
+    # poll() is the portable check -- see test_cancel_hook for why os.kill(pid, 0)
+    # cannot tell a dead child from a live one on Windows.
+    assert child.poll() is not None
     qt_app.processEvents()
