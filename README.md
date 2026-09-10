@@ -16,7 +16,10 @@ Decorator-driven GUI framework for Python. Annotate your methods — decoui gene
 - **Parallel tool tabs** — keep multiple tool pages open and switch between running tasks
 - **Persistent layout** — sidebar width is restored from the application database
 - **Replay** — restore any past run's parameters with one click
-- **Light theme** — clean built-in stylesheet, Consolas / 微软雅黑 / Meiryo font stack
+- **Settings store** — `store("ns")[key] = value`, namespaced and persisted in the same database
+- **Help panel** — a reference built from the docstrings the tools already carry, with cross-references, tabs and back/forward
+- **Themes** — four built in, any number as JSON files; changed from Settings without a restart
+- **Translatable interface** — decoui's own text ships as one JSON catalogue per language
 
 ---
 
@@ -148,6 +151,7 @@ gui_main(title="My App", db_path="~/.myapp/history.db", on_startup=connect_backe
 | `toolsets` | `Sequence[type]\|None` | `None` | The `@toolset` classes to load. When omitted, every one visible in the calling namespace is discovered. |
 | `theme` | `str\|None` | `None` | Default theme id. A theme the user picked in Settings wins over it. See [Themes](#themes). |
 | `theme_dir` | `str\|Path\|None` | `~/.decoui/themes` | Directory scanned for user-supplied theme files. |
+| `language` | `str\|None` | `None` | Code for the language decoui's **own** interface is drawn in — Run, Stop, the history columns. A language the user picked in Settings wins over it. A tool's own label, description and docstring are never translated. Defaults to English. |
 
 By default `gui_main()` scans the caller's namespace, so a toolset has to be imported *and* look used:
 
@@ -595,9 +599,144 @@ The gear button at the top right opens **Settings**, which lists every theme
 available -- built-in and user-supplied alike -- and starts on the one currently
 in effect.
 
-Themes are applied once, at startup, so a change takes effect the next time the
-application runs. Nothing about the open window changes when the dialog closes;
-that is why the dialog says so before you choose.
+A new theme is applied as soon as the dialog closes, to every window that is
+open. Nothing is rebuilt: a tool that is running goes on running, the forms keep
+what was typed into them, and output already printed is re-inked in the new
+colours. The one thing that is lost is the console's scroll position, which
+returns to the newest line.
+
+The **interface language**, chosen in the same dialog, is the exception: it
+takes effect on the next launch. Text is read as each widget is built, in far
+more places than colour is, and there is no equivalent of the application
+stylesheet to catch the rest. The dialog says which is which before you choose.
+
+---
+
+## Help Panel
+
+The **?** button in the top bar opens a reference for everything loaded in the
+session. Nothing has to be declared for it: a tool's page is built from the
+docstring the method already carries — its summary, the prose under it, and the
+`Args:`, `Returns:` and `Raises:` sections of Google style.
+
+Write the docstring for the person **using** the tool, not for the person
+reading the file. Notes about which annotation produces which widget belong in
+`#` comments above the method; comments are not collected, so the two audiences
+stay separated.
+
+Alongside the tools, the panel carries decoui's own guide — how history works,
+what Replay actually replays, how to change theme. That part ships with decoui
+and is translated with the rest of the interface.
+
+Each page opens in its own tab, the way the main window opens a tool, and the
+arrows above the tabs walk back and forward through the pages visited.
+
+### Cross-references
+
+A docstring or a guide page can point at another page:
+
+```
+[Encode Text](MyTools.encode)     one tool
+[Text Tools](MyTools)             a whole toolset
+[Themes](guide.themes)            one of decoui's own pages
+```
+
+The target is a **key**, never a title or a file name:
+
+| Key | Page |
+|---|---|
+| `guide` | decoui's own contents page |
+| `guide.<slug>` | one of decoui's guide pages |
+| `ClassName` | a toolset |
+| `ClassName.method` | a tool |
+
+Keys do not change when a page is translated, so one written link works in
+every language.
+
+A reference to a key that does not resolve — a tool the application did not
+load, a typo — renders as its own text with no link on it. Which tools exist is
+up to the application, so a guide cannot be written against a fixed set, and a
+dead link is worse than the sentence without it. Only decoui's own scheme is
+followed; an `http` URL written into a docstring stays inert.
+
+Link colour comes from the theme's `text.link` token.
+
+---
+
+## Remembering Things Between Runs
+
+A tool often has one thing worth keeping — the environment last deployed to,
+the folder last exported into, whether the verbose flag was on. `store()` gives
+you a namespaced key/value store, persisted in the same SQLite database as the
+run history.
+
+```python
+from decoui import store, tool, toolset
+
+@toolset(label="Deploy")
+class DeployTools:
+
+    def load_defaults(self) -> dict:
+        return {"env": store("deploy").get("last_env", "staging")}
+
+    @tool(label="Deploy Service", defaults="load_defaults")
+    def deploy(self, service: str, env: str) -> None:
+        """Deploy a service.
+
+        Args:
+            service: What to deploy.
+            env: Where to deploy it.
+        """
+        store("deploy")["last_env"] = env      # inserted if new, replaced if not
+```
+
+It behaves as a mapping:
+
+| | |
+|---|---|
+| `s[key] = value` / `s.set(key, value)` | write; there is nothing to register first |
+| `s[key]` | read, `KeyError` when absent |
+| `s.get(key, default)` | read with a fallback |
+| `del s[key]` / `s.delete(key)` | remove; removing what was never there is fine |
+| `key in s`, `len(s)`, `list(s)` | the usual |
+| `s.keys()`, `s.items()` | everything in this namespace, sorted |
+
+### The namespace
+
+`store("deploy")` and `store("deploy")` anywhere else in the application reach
+the same rows — that is how a setting shared by every tool is shared. Omit the
+name and you get `app`, for an application that only needs one.
+
+`ui` and `decoui` are refused: they hold the chosen theme, the interface
+language and the sidebar width. An application writing there would be changing
+the user's settings rather than its own.
+
+A namespace may not contain a dot, because the dot is what separates it from
+the key. Keys may contain anything.
+
+### Values
+
+Anything JSON can carry — `str`, `int`, `float`, `bool`, `None`, and lists and
+dicts of those — and it comes back as the type it went in as. A value JSON
+cannot carry raises `TypeError` where you wrote it, rather than being coerced
+to a string that fails somewhere else later.
+
+`None` is a stored value, not an absence: `key in store` still reports `True`.
+
+Tuples come back as lists. JSON has no tuple.
+
+### What it is not
+
+A settings store, not an application database: small values, one at a time, no
+queries and no relations. A tool with real data of its own should open its own
+file.
+
+Reads and writes go straight to the database — there is no cache — and every
+call opens and closes its own connection, so this is safe to use from a tool
+body, which runs on a worker thread.
+
+Clearing the run history does **not** clear these: `clear_all_records()` leaves
+the settings table alone.
 
 ---
 
