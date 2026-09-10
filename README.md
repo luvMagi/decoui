@@ -130,6 +130,9 @@ def merge(self, files: list, output: str = "out.txt") -> str:
 | `cascade` | `dict[str,callable\|str]` | `{}` | Fill other parameters when this one changes. |
 | `defaults` | `dict\|callable\|str` | `None` | Initial form values, evaluated when the page opens. |
 | `completion_debounce_ms` | `int` | `250` | Idle time before a dynamic completions callback runs. |
+| `on_cancel` | `callable\|str` | `None` | Cleanup to run when the tool is cancelled. See [Cancellation](#cancellation). |
+
+Every key in `placeholders`, `labels`, `completions`, `cascade` and `defaults` must name a real parameter of the method, and `placeholders`/`labels` values must be strings. A mistake raises at startup, when the toolset tree is built, naming the tool and listing the parameters it does have.
 
 ### `gui_main`
 
@@ -142,6 +145,25 @@ gui_main(title="My App", db_path="~/.myapp/history.db", on_startup=connect_backe
 | `title` | `str` | `"decoui"` | Window title. |
 | `db_path` | `str\|Path\|None` | `~/.decoui/history.db` | SQLite database path for execution history and application settings. |
 | `on_startup` | `callable\|None` | `None` | Application-wide setup, run once before any toolset is created and before the window appears. See [Startup](#startup). |
+| `toolsets` | `Sequence[type]\|None` | `None` | The `@toolset` classes to load. When omitted, every one visible in the calling namespace is discovered. |
+
+By default `gui_main()` scans the caller's namespace, so a toolset has to be imported *and* look used:
+
+```python
+from mytools.restore import RestoreTools  # noqa: F401 -- discovered by gui_main()
+
+gui_main(title="My App")
+```
+
+Naming them explicitly drops the pragma and the comment that has to explain it:
+
+```python
+from mytools.restore import RestoreTools
+
+gui_main(title="My App", toolsets=[RestoreTools])
+```
+
+The list controls *what* loads, not the order it appears in: the sidebar is always sorted by label.
 
 ### Startup
 
@@ -373,6 +395,31 @@ Tool methods can use `print()` and the standard `logging` module. Both are captu
 
 Return values from tool methods are **not** displayed in the GUI. Use `logging` or `print` for any output you want users to see.
 
+### Progress
+
+Long, quiet work looks indistinguishable from a hang. `progress()` drives the page's progress bar and the status text next to it:
+
+```python
+from decoui import progress, tool, toolset
+
+@tool(label="Dump")
+def dump(self, schema: str) -> None:
+    for index, table in enumerate(tables):
+        progress(index, len(tables), f"dumping {table}")
+        dump_table(table)
+    progress(len(tables), len(tables), "done")
+```
+
+| Argument | Meaning |
+|---|---|
+| `done` | Units completed so far. |
+| `total` | Total units, or `0` when unknown — the bar stays indeterminate and only the message updates. |
+| `message` | Short status text. Replaces "Running…" while set. |
+
+Calls closer than 100 ms apart are dropped so a tight loop cannot flood the GUI; the final call (`done >= total`) is always delivered.
+
+Outside a running tool — when you instantiate the toolset and call the method directly, as in a test — `progress()` does nothing at all. It prints nothing and raises nothing, so a tool stays callable as a plain method.
+
 ---
 
 ## Tool Page Buttons
@@ -385,6 +432,61 @@ Return values from tool methods are **not** displayed in the GUI. Use `logging` 
 | **Replay** | Open the History panel pre-filtered to this tool's past runs. |
 | **Copy** | Copy current console output to clipboard. |
 | **View Log** | Open the current console output in a resizable log viewer window. |
+
+---
+
+## Cancellation
+
+**If your tool starts a subprocess, declare `on_cancel`.** Without it, pressing Stop leaves the child
+running.
+
+Cancellation works by injecting an exception into the worker thread. That has two consequences most
+cleanup code gets wrong:
+
+**1. `except Exception` does not catch it.** The injected `_WorkerCancelled` derives from
+`BaseException`, so an ordinary handler lets it pass straight through.
+
+**2. `finally` does not save you either.** The injected exception is only raised at a Python bytecode
+boundary. A thread parked in `proc.wait()`, `socket.recv()` or any other C call does not reach one
+until that call returns on its own — so a `finally` block waiting to terminate the child does not run
+until the child has already finished. That is the entire problem: the child is exactly what needs to
+be stopped.
+
+`on_cancel` runs on the GUI thread, *before* the interrupt is injected, while the worker is still
+blocked. That is the only moment anything can reach the child:
+
+```python
+@toolset(label="Database")
+class RestoreTools:
+
+    @tool(label="Restore", on_cancel="stop")
+    def restore(self, archive: Path) -> None:
+        self.proc = subprocess.Popen(["pg_restore", str(archive)], encoding="utf-8")
+        self.proc.wait()
+
+    def stop(self) -> None:
+        proc = getattr(self, "proc", None)
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+```
+
+**3. The hook runs concurrently with your tool.** It is on the GUI thread while the tool body is
+still on the worker thread, so:
+
+- keep it to idempotent interruption — `terminate()`, `close()`, `cancel()` — and do not touch state
+  the tool body is writing;
+- tolerate state that does not exist yet: Stop can be pressed before the tool assigns it, which is
+  why the example reads `getattr(self, "proc", None)`;
+- keep it fast. It blocks the GUI. Slow cleanup belongs in the tool's own `finally`.
+
+A hook that raises is reported as an `ERROR` line in that run's log; cancellation still completes.
+
+**4. After cancellation the run is recorded as `cancelled` and the return value is dropped.** The
+`Popen` object is left unusable, too: the injection can land between `waitpid()` returning and
+`Popen` recording the status, so `proc.returncode` may stay `None` even though the child is gone.
+Check the child through the OS if you need its fate.
+
+`timeout=` uses this same path — from the tool's side a timeout and a Stop press are the same event.
 
 ---
 
@@ -409,6 +511,13 @@ History is stored at `~/.decoui/history.db` by default. Override with `db_path` 
 ## Example
 
 See [`src/decoui/example.py`](src/decoui/example.py) for a complete demo covering all supported widget types.
+
+Two tools there are worth reading as a pair before writing anything that runs for a while:
+
+| Tool | Shows |
+|---|---|
+| **Demo Tools → Slow Task** | `progress()` driving the bar, `confirm=True`, and what a failed run looks like. Cancellable on its own, because it only sleeps. |
+| **Demo Tools → Run Child Process** | `on_cancel` around a real subprocess. Press **Stop** while it runs: the hook is what actually kills the child, and the `with Popen(...)` block is what reaps it. |
 
 Run it with:
 
