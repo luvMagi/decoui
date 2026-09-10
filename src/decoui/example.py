@@ -15,6 +15,14 @@ What each toolset demonstrates::
                   loaded in on_startup()
 
 Note:
+    **Logging needs a level set by the application.** decoui attaches its
+    console handler to the root logger but does not change that logger's level,
+    and an unconfigured root logger filters everything below WARNING. Several
+    tools here log at INFO and DEBUG, so their output only reaches the console
+    when the entry point has called ``logging.basicConfig(level=...)`` -- see
+    ``main.py``. This module deliberately does not call it itself: configuring
+    logging is the application's job, not an importable module's.
+
     Every tool here is an ordinary method with ordinary arguments, and every one
     of them can be called directly -- ``TextTools().count("abc")`` works with no
     GUI involved. That is the property to preserve when writing new tools.
