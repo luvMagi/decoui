@@ -119,13 +119,35 @@ def test_broken_file_does_not_hide_the_others(tmp_path: Path) -> None:
 
 
 def test_user_theme_may_replace_a_builtin(tmp_path: Path) -> None:
-    """Verify shadowing works and is reported rather than silent."""
+    """Verify shadowing a built-in works and stays silent.
+
+    Re-skinning a built-in is a supported thing to do, and the file stays where
+    it is once the user has put it there -- so reporting it would mean the same
+    modal dialog on every single launch, with no way to dismiss it for good.
+    """
     _theme_file(tmp_path, "light", "My Light")
 
     themes, problems = discover_themes(tmp_path)
 
     assert themes["light"].name == "My Light"
-    assert any("replaces" in problem.summary for problem in problems)
+    assert problems == []
+
+
+def test_two_user_themes_claiming_one_id_are_reported(tmp_path: Path) -> None:
+    """Verify a collision between the user's own files is not silent.
+
+    Unlike shadowing a built-in this is nothing anyone asked for: one of the two
+    files loses on filename order alone, and nothing else would say which.
+    """
+    # _theme_file() names the file after the theme: mine-a.json, mine-b.json.
+    _theme_file(tmp_path, "mine", "Mine A")
+    _theme_file(tmp_path, "mine", "Mine B")
+
+    themes, problems = discover_themes(tmp_path)
+
+    assert themes["mine"].name == "Mine B"
+    assert len(problems) == 1
+    assert "mine-a.json" in problems[0].detail
 
 
 def test_extends_still_reaches_the_builtin_when_shadowed(tmp_path: Path) -> None:

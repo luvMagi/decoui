@@ -22,10 +22,13 @@ from PySide6.QtWidgets import (
 )
 
 from ..storage.db import set_setting
-from ..theme import active_theme, active_theme_dir, discover_themes
-
-#: Settings key holding the chosen theme id.
-THEME_SETTING = "ui.theme"
+from ..theme import (
+    THEME_SETTING,
+    active_theme,
+    active_theme_dir,
+    builtin_themes,
+    discover_themes,
+)
 
 
 class SettingsDialog(QDialog):
@@ -51,7 +54,16 @@ class SettingsDialog(QDialog):
         # Problems are ignored here: they were already reported at startup, and
         # a dialog is not the place to re-raise them. A theme that failed to
         # load simply is not in the list.
-        themes, _ = discover_themes(active_theme_dir())
+        #
+        # The guard is not for those: it is for anything load_theme() might one
+        # day let through that is *not* a ThemeError. This runs inside a Qt slot,
+        # where an escaping exception leaves the event loop rather than merely
+        # losing the list, so the gear button would stop opening Settings at all.
+        # The built-ins are always enough to render a usable dialog.
+        try:
+            themes, _ = discover_themes(active_theme_dir())
+        except Exception:
+            themes = builtin_themes()
         current = active_theme()
 
         self._combo = QComboBox(self)

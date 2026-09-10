@@ -26,8 +26,8 @@ from typing import Callable
 from .decorators import _TOOL_ATTR, _TOOLSET_ATTR
 from .theme import (
     DEFAULT_THEME_ID,
+    THEME_SETTING,
     Theme,
-    ThemeProblem,
     discover_themes,
     render_stylesheet,
     resolve_theme,
@@ -209,14 +209,16 @@ def _apply_startup_theme(
     set_active_theme_dir(theme_dir)
     try:
         themes, discovery_problems = discover_themes(theme_dir)
-        requested = get_setting("ui.theme") or theme
+        requested = get_setting(THEME_SETTING) or theme
         active, resolve_problems = resolve_theme(themes, requested)
     except Exception:
-        # Nothing above is supposed to raise; this path exists so that a defect
-        # in theme loading can never be what stops an application from opening.
+        # Nothing above is supposed to raise: one unusable file becomes one
+        # ThemeProblem inside discover_themes, so the rest of the directory
+        # still loads. This path exists only so that a defect in theme loading
+        # can never be what stops an application from opening -- reaching it
+        # costs the user every theme they wrote, so it is a bug, not a policy.
         from .theme import builtin_themes as _builtin
         active = _builtin()[DEFAULT_THEME_ID]
-        discovery_problems, resolve_problems = [], []
         _apply_theme(app, active)
         return [StartupProblem(
             source="Themes",
