@@ -161,6 +161,15 @@ class LogWindow(QMainWindow):
 
         self._rerender()
 
+    def retheme(self) -> None:
+        """Repaint the console, and the lines already in it, under a new theme.
+
+        This window holds its own copy of the entries, so re-inking them is the
+        same redraw the level filters already do. See :mod:`decoui.ui.retheme`.
+        """
+        self._console.setStyleSheet(console_style())
+        self._rerender()
+
     def _select_all_levels(self):
         """Enable every level filter."""
         self._active_levels = set(_ALL_LEVELS)

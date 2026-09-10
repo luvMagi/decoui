@@ -78,7 +78,6 @@
   "settings.title": "Настройки",
   "settings.theme": "Тема:",
   "settings.language": "Язык:",
-  "settings.restart_note": "Изменения вступят в силу после перезапуска.",
 
   "help.title": "Справка — Справочник по инструментам",
   "help.search_placeholder": "Фильтр по названию инструмента или группы…",

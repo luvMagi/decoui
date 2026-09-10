@@ -2,7 +2,16 @@
 
 Das Zahnrad-Symbol oben rechts öffnet die Einstellungen, in denen alle verfügbaren Designs aufgelistet sind und das aktuell aktive Design vorausgewählt ist.
 
-Designs werden einmalig beim Start der Anwendung geladen, sodass eine Änderung erst beim **nächsten** Start wirksam wird. Beim Schließen des Dialogs ändert sich am aktuellen Fenster nichts; der Dialog weist Sie vor der Auswahl auch darauf hin.
+Themes are applied at once. Choosing one restyles every window that is open,
+without rebuilding anything: a tool that is running goes on running, forms keep
+what was typed into them, and output already printed is re-inked in the new
+colours. The console's scroll position is the one casualty -- it returns to the
+newest line.
+
+The **language**, chosen in the same dialog, is the exception: it takes effect
+the next time the application runs. Text is read as each widget is built, in far
+more places than colour is, and there is nothing that can catch the rest the way
+the stylesheet catches colour.
 
 decoui enthält 4 Standarddesigns: ein helles Standarddesign und drei Designs im Panel-Stil.
 

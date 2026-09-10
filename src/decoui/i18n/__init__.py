@@ -12,9 +12,13 @@ complete -- every other one falls back to it key by key, which means a partial
 translation shows translated text where it exists and English where it does not,
 rather than failing.
 
-Like the theme, the language is applied once at startup and not swapped in a
-running window: widgets read their text when they are built, so a live swap
-would leave every already-built label stale. See :func:`decoui.i18n.set_language`.
+The language is applied once at startup and not swapped in a running window:
+widgets read their text when they are built, so a live swap would leave every
+already-built label stale. The theme is no longer like this -- it can be
+changed in place, because colour has the application stylesheet to carry most
+of it and only a handful of widgets ink themselves. Text has no equivalent:
+every string is read at build time, and there are far more of them. See
+:func:`decoui.i18n.set_language` and :mod:`decoui.ui.retheme`.
 """
 from __future__ import annotations
 
@@ -88,7 +92,7 @@ def language_name(language: str) -> str:
 
 
 #: The language in effect. Set once by gui_main() before any widget is built,
-#: exactly as the active theme is. None means "nothing applied yet", which is
+#: as the active theme is at startup. None means "nothing applied yet", which is
 #: the case in tests and anywhere a widget is built outside gui_main().
 _ACTIVE_LANGUAGE: str | None = None
 

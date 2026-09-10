@@ -94,13 +94,8 @@ class TagBar(QWidget):
         outer.setSpacing(10)
 
         label = QLabel(t("topbar.tags"), self)
-        # Without this the label paints the generic QWidget background from the
-        # application stylesheet, punching a lighter rectangle out of the bar's
-        # band -- which is why the band looked as if it started after the label.
-        label.setStyleSheet(
-            f"background: transparent; color: {active_theme().colors['text.on_topbar']};"
-        )
         outer.addWidget(label)
+        self._label = label
 
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
@@ -109,14 +104,6 @@ class TagBar(QWidget):
         # right alongside the first pill's own border, and the two read as one
         # smudged line. Nothing about this area should be visible at all.
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        # A QScrollArea paints through a separate viewport widget, and the
-        # generic QWidget rule in the application stylesheet reaches that
-        # viewport. Asking for a transparent background is not enough to win
-        # that cascade, so the band colour is painted onto the area, its
-        # viewport and the pill container explicitly.
-        band = f"background: {active_theme().colors['bg.topbar']};"
-        scroll.setStyleSheet(f"QScrollArea {{ {band} border: none; }}")
-        scroll.viewport().setStyleSheet(band)
         scroll.setHorizontalScrollBarPolicy(
             __import__("PySide6.QtCore", fromlist=["Qt"]).Qt.ScrollBarPolicy.ScrollBarAsNeeded
         )
@@ -125,7 +112,7 @@ class TagBar(QWidget):
         )
 
         container = QWidget(scroll)
-        container.setStyleSheet(band)
+        container.setObjectName("tagStrip")
         row = QHBoxLayout(container)
         # Left inset inside the scrolling area as well as outside it: at zero
         # the first pill sits flush against the viewport edge, where its border
@@ -133,11 +120,9 @@ class TagBar(QWidget):
         row.setContentsMargins(6, 0, 0, 0)
         row.setSpacing(6)
 
-        pill_style = _pill_style()
         all_btn = QPushButton(t("common.all"), container)
         all_btn.setCheckable(True)
         all_btn.setChecked(True)
-        all_btn.setStyleSheet(pill_style)
         all_btn.clicked.connect(self._clear_all)
         row.addWidget(all_btn)
         self._all_btn = all_btn
@@ -145,7 +130,6 @@ class TagBar(QWidget):
         for tag in sorted(all_tags):
             btn = QPushButton(tag, container)
             btn.setCheckable(True)
-            btn.setStyleSheet(pill_style)
             btn.clicked.connect(lambda checked, t=tag: self._toggle_tag(t, checked))
             row.addWidget(btn)
             self._buttons[tag] = btn
@@ -153,6 +137,8 @@ class TagBar(QWidget):
         row.addStretch()
         scroll.setWidget(container)
         outer.addWidget(scroll)
+        self._scroll = scroll
+        self._container = container
 
         # Added to the *outer* layout, deliberately: inside the scroll area it
         # would drift off-screen as soon as there were enough tags to scroll.
@@ -170,6 +156,56 @@ class TagBar(QWidget):
         settings_btn.clicked.connect(self.settings_requested)
         outer.addWidget(settings_btn)
         self._settings_btn = settings_btn
+
+        self._apply_styles()
+
+    def _apply_styles(self) -> None:
+        """Write every colour this bar sets on itself, from the active theme.
+
+        Called from ``__init__`` and again from :meth:`retheme`, so the bar has
+        exactly one description of its own colours rather than one per entry
+        point that could drift from the other.
+        """
+        colors = active_theme().colors
+
+        # Without this the label paints the generic QWidget background from the
+        # application stylesheet, punching a lighter rectangle out of the bar's
+        # band -- which is why the band looked as if it started after the label.
+        self._label.setStyleSheet(
+            f"background: transparent; color: {colors['text.on_topbar']};"
+        )
+
+        # A QScrollArea paints through a separate viewport widget, and the
+        # generic QWidget rule in the application stylesheet reaches that
+        # viewport. Asking for a transparent background is not enough to win
+        # that cascade, so the band colour is painted onto the area, its
+        # viewport and the pill container explicitly.
+        #
+        # Each selector names one widget by id. A stylesheet set on a widget
+        # reaches its whole subtree, so the unqualified form would put the band
+        # colour behind every pill as well -- harmless only for as long as each
+        # pill keeps a stylesheet of its own to override it. history_page paid
+        # this bill once already, with a transparent background that turned
+        # every control in the filter row black.
+        band = f"background: {colors['bg.topbar']};"
+        self._scroll.setStyleSheet(f"QScrollArea {{ {band} border: none; }}")
+        self._scroll.viewport().setStyleSheet(
+            f"QWidget#qt_scrollarea_viewport {{ {band} }}"
+        )
+        self._container.setStyleSheet(f"QWidget#tagStrip {{ {band} }}")
+
+        pill_style = _pill_style()
+        self._all_btn.setStyleSheet(pill_style)
+        for btn in self._buttons.values():
+            btn.setStyleSheet(pill_style)
+
+    def retheme(self) -> None:
+        """Repaint the bar under the theme that has just become active.
+
+        The band and the pills are the top bar's own work -- neither survives a
+        stylesheet swap on its own. See :mod:`decoui.ui.retheme`.
+        """
+        self._apply_styles()
 
     def paintEvent(self, event: QPaintEvent) -> None:
         """Draw the stylesheet background Qt would otherwise skip.

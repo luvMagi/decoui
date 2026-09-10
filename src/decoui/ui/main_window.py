@@ -216,9 +216,10 @@ class MainWindow(QMainWindow):
     def _open_settings(self) -> None:
         """Open the settings dialog.
 
-        The dialog writes the chosen theme itself. Nothing is applied here:
-        decoui themes a window once, when it is built, so a change takes effect
-        on the next launch and the current window is deliberately left alone.
+        The dialog does its own work: it records the choices, and applies a new
+        theme to every open window before it closes. Nothing is left for this
+        window to do -- a re-theme reaches it through the same pass as any other
+        window, not because it happens to be the one that opened the dialog.
         """
         SettingsDialog(self).exec()
 

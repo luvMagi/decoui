@@ -2,7 +2,16 @@
 
 오른쪽 상단의 톱니바퀴 버튼을 누르면 '설정'이 열리며, 사용 가능한 모든 테마 목록이 표시되고 현재 적용 중인 테마가 기본 선택됩니다.
 
-테마는 애플리케이션이 시작될 때 한 번 적용되므로, 변경 사항은 **다음에 실행할 때** 적용됩니다. 대화상자를 닫아도 현재 열려 있는 창에는 아무런 변화가 없으며, 선택하기 전에 대화상자에도 이와 같은 안내가 표시됩니다.
+Themes are applied at once. Choosing one restyles every window that is open,
+without rebuilding anything: a tool that is running goes on running, forms keep
+what was typed into them, and output already printed is re-inked in the new
+colours. The console's scroll position is the one casualty -- it returns to the
+newest line.
+
+The **language**, chosen in the same dialog, is the exception: it takes effect
+the next time the application runs. Text is read as each widget is built, in far
+more places than colour is, and there is nothing that can catch the rest the way
+the stylesheet catches colour.
 
 decoui에는 4가지 기본 테마가 제공됩니다: 기본 라이트 테마와 3가지 패널 스타일 테마입니다.
 

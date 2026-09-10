@@ -78,7 +78,6 @@
   "settings.title": "設定",
   "settings.theme": "佈景主題:",
   "settings.language": "語言:",
-  "settings.restart_note": "變更將在重新啟動後生效。",
 
   "help.title": "說明 — 工具參考",
   "help.search_placeholder": "依工具名稱或分組名稱篩選…",

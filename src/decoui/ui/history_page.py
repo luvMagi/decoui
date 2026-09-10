@@ -101,14 +101,28 @@ class HistoryPage(QWidget):
         """
         container = QWidget(self)
         container.setLayout(row)
-        container.setStyleSheet("background: transparent;")
+        # Every selector here names exactly one widget by id. A stylesheet set
+        # on a widget reaches its whole subtree, and a bare "background:
+        # transparent" outranks the application stylesheet's own QComboBox and
+        # QPushButton rules -- so the controls in this row lost their field
+        # colour and Qt resolved the transparency to black in their palette.
+        # Under Fusion transparent means "do not paint" and the page showed
+        # through, which hid it; the Windows 11 style paints from the palette
+        # and drew black text on black. A bare "QWidget { ... }" is no better:
+        # it matches every descendant too. Only the id form stops here.
+        container.setObjectName("controlStrip")
+        container.setStyleSheet(
+            "QWidget#controlStrip { background: transparent; }"
+        )
 
         scroll = QScrollArea(self)
         scroll.setWidget(container)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
-        scroll.viewport().setStyleSheet("background: transparent;")
+        scroll.viewport().setStyleSheet(
+            "QWidget#qt_scrollarea_viewport { background: transparent; }"
+        )
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         # Room for the horizontal bar, which only appears when it is needed.

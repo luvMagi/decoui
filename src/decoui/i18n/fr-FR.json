@@ -78,7 +78,6 @@
   "settings.title": "Paramètres",
   "settings.theme": "Thème :",
   "settings.language": "Langue :",
-  "settings.restart_note": "Les modifications prendront effet après le redémarrage.",
 
   "help.title": "Aide — Référence des outils",
   "help.search_placeholder": "Filtrer par nom d'outil ou de groupe…",

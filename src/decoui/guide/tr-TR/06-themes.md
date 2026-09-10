@@ -2,7 +2,16 @@
 
 Sağ üstteki dişli simgesi, mevcut tüm temaları listeleyen ve o anda etkin olan temanın seçili olarak geldiği Ayarlar'ı açar.
 
-Temalar uygulama başlatıldığında bir kez uygulanır, bu nedenle yapılan bir değişiklik **bir sonraki** çalıştırmada geçerli olur. İletişim kutusu kapatıldığında açık olan pencerede hiçbir şey değişmez; iletişim kutusunda da seçiminizi yapmadan önce bu durum belirtilir.
+Themes are applied at once. Choosing one restyles every window that is open,
+without rebuilding anything: a tool that is running goes on running, forms keep
+what was typed into them, and output already printed is re-inked in the new
+colours. The console's scroll position is the one casualty -- it returns to the
+newest line.
+
+The **language**, chosen in the same dialog, is the exception: it takes effect
+the next time the application runs. Text is read as each widget is built, in far
+more places than colour is, and there is nothing that can catch the rest the way
+the stylesheet catches colour.
 
 decoui 4 dahili tema ile birlikte gelir: varsayılan bir açık renk tema ve üç panel tarzı tema.
 

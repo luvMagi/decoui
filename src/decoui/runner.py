@@ -34,6 +34,7 @@ from .theme import (
     resolve_theme,
     set_active_theme,
     set_active_theme_dir,
+    theme_font,
 )
 from .registry import build_tree
 from .storage.db import get_setting, init_db, set_db_path
@@ -134,9 +135,10 @@ def gui_main(
     app = QApplication.instance() or QApplication(sys.argv)
     app.setWindowIcon(QIcon(str(_icon_path())))
 
-    # The database comes first: the user's theme choice lives in it. The theme
-    # is then applied before anything is built, because decoui never re-themes
-    # a running window -- widgets read their colours as they are constructed.
+    # The database comes first: the user's theme and language choices live in
+    # it. Both are applied before anything is built, because widgets read their
+    # text and the colours they ink themselves with as they are constructed.
+    # The theme can be swapped later (ui/retheme.py); the language cannot.
     init_db()
     # Language before the theme, and both before anything is built: the theme's
     # own failure dialog is written in decoui's interface language, so the
@@ -403,27 +405,21 @@ def _callable_name(target: Callable) -> str:
 def _apply_fonts(app, theme: Theme) -> None:
     """Set the application font from the theme.
 
-    The families are tried in order and Qt falls back through them, so the same
-    theme renders on Windows, macOS and Linux without per-platform code.
-
     Args:
         app: The QApplication to configure.
         theme: The theme supplying the font.
     """
-    from PySide6.QtGui import QFont
-    ui_font = QFont()
-    ui_font.setFamilies(list(theme.font.family))
-    ui_font.setPointSize(theme.font.size_pt)
-    app.setFont(ui_font)
+    app.setFont(theme_font(theme))
 
 
 def _apply_theme(app, theme: Theme) -> None:
     """Install a theme: its stylesheet, its font, and the record of what is live.
 
-    Called once, before any widget exists. decoui does not re-theme a running
-    application -- widgets that style themselves in code read the theme at
-    construction time, so a swap would leave them stale. Changing theme means
-    restarting.
+    This is the startup path, running before any widget exists. Changing theme
+    later goes through :func:`decoui.ui.retheme.retheme_application`, which does
+    the same three things and then walks the open windows -- widgets that style
+    themselves in code have to be told, because a stylesheet swap does not reach
+    what they set on themselves.
 
     Args:
         app: The QApplication to configure.

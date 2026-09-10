@@ -2,7 +2,16 @@
 
 右上角的齿轮按钮可打开“设置”，其中列出了所有可用主题，并默认定位到当前生效的主题。
 
-主题在应用程序启动时应用一次，因此更改将在**下次**运行时生效。关闭对话框时当前打开的窗口不会发生任何变化；对话框在您选择之前也会提示此说明。
+Themes are applied at once. Choosing one restyles every window that is open,
+without rebuilding anything: a tool that is running goes on running, forms keep
+what was typed into them, and output already printed is re-inked in the new
+colours. The console's scroll position is the one casualty -- it returns to the
+newest line.
+
+The **language**, chosen in the same dialog, is the exception: it takes effect
+the next time the application runs. Text is read as each widget is built, in far
+more places than colour is, and there is nothing that can catch the rest the way
+the stylesheet catches colour.
 
 decoui 自带 4 种主题：默认浅色主题，以及 3 种面板风格的主题。
 

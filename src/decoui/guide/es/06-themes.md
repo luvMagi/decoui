@@ -2,7 +2,16 @@
 
 El botón de engranaje situado en la esquina superior derecha abre Configuración, donde se muestran todos los temas disponibles y se selecciona inicialmente el que está activo en ese momento.
 
-Los temas se aplican una sola vez al iniciar la aplicación, por lo que cualquier cambio surte efecto la **próxima** vez que se ejecute. La ventana abierta no cambia en absoluto al cerrar el cuadro de diálogo; este mismo mensaje se indica antes de realizar la selección.
+Themes are applied at once. Choosing one restyles every window that is open,
+without rebuilding anything: a tool that is running goes on running, forms keep
+what was typed into them, and output already printed is re-inked in the new
+colours. The console's scroll position is the one casualty -- it returns to the
+newest line.
+
+The **language**, chosen in the same dialog, is the exception: it takes effect
+the next time the application runs. Text is read as each widget is built, in far
+more places than colour is, and there is nothing that can catch the rest the way
+the stylesheet catches colour.
 
 decoui incluye 4 temas predeterminados: un tema claro por defecto y tres temas con estilo de paneles.
 

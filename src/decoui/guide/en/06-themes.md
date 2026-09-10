@@ -3,9 +3,16 @@
 The gear button at the top right opens Settings, which lists every available
 theme and starts on the one currently in effect.
 
-Themes are applied once, when the application starts, so a change takes effect
-the **next** time it runs. Nothing about the open window changes when the dialog
-closes; the dialog says so before you choose.
+Themes are applied at once. Choosing one restyles every window that is open,
+without rebuilding anything: a tool that is running goes on running, forms keep
+what was typed into them, and output already printed is re-inked in the new
+colours. The console's scroll position is the one casualty -- it returns to the
+newest line.
+
+The **language**, chosen in the same dialog, is the exception: it takes effect
+the next time the application runs. Text is read as each widget is built, in far
+more places than colour is, and there is nothing that can catch the rest the way
+the stylesheet catches colour.
 
 Four themes ship with decoui: a light default, and three panel-styled ones.
 

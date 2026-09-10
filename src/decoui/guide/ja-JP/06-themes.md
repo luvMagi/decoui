@@ -2,7 +2,16 @@
 
 右上の歯車ボタンを押すと「設定」が開き、利用可能なすべてのテーマが一覧表示され、現在適用されているテーマが初期選択されます。
 
-テーマはアプリケーション起動時に一度だけ適用されるため、変更は**次回起動時**に反映されます。ダイアログを閉じても現在開いているウィンドウの表示は変わりません（ダイアログ内にもその旨が記載されています）。
+Themes are applied at once. Choosing one restyles every window that is open,
+without rebuilding anything: a tool that is running goes on running, forms keep
+what was typed into them, and output already printed is re-inked in the new
+colours. The console's scroll position is the one casualty -- it returns to the
+newest line.
+
+The **language**, chosen in the same dialog, is the exception: it takes effect
+the next time the application runs. Text is read as each widget is built, in far
+more places than colour is, and there is nothing that can catch the rest the way
+the stylesheet catches colour.
 
 decoui には 4 種類のテーマが同梱されています: デフォルトのライトテーマと、3 種類のパネルスタイルのテーマです。
 

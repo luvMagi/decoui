@@ -2,7 +2,16 @@
 
 Кнопка с шестеренкой в правом верхнем углу открывает «Настройки», где перечислены все доступные темы с предварительно выбранной активной темой.
 
-Темы применяются один раз при запуске приложения, поэтому любые изменения вступают в силу при **следующем** запуске. При закрытии диалогового окна открытое окно не меняется; предупреждение об этом отображается в самом диалоге перед выбором.
+Themes are applied at once. Choosing one restyles every window that is open,
+without rebuilding anything: a tool that is running goes on running, forms keep
+what was typed into them, and output already printed is re-inked in the new
+colours. The console's scroll position is the one casualty -- it returns to the
+newest line.
+
+The **language**, chosen in the same dialog, is the exception: it takes effect
+the next time the application runs. Text is read as each widget is built, in far
+more places than colour is, and there is nothing that can catch the rest the way
+the stylesheet catches colour.
 
 В decoui встроено 4 темы: светлая тема по умолчанию и три темы в панельном стиле.
 
