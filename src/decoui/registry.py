@@ -1,4 +1,25 @@
-"""Annotation scanning and ToolTree construction."""
+"""Annotation scanning and ToolTree construction.
+
+Everything the decorators recorded is interpreted here, once, at startup.
+:func:`build_tree` walks the decorated classes, resolves each tool's
+annotations, validates the declarations against the real signature, and returns
+the tree the UI is built from.
+
+Two consequences for tools:
+
+* **This is where a bad declaration is reported.** A ``placeholders`` key that
+  names no parameter, a ``completions`` callback method that does not exist, a
+  non-str label -- all raise here, when the application starts, naming the tool
+  and listing the parameters it does have. Nothing is checked at import time, so
+  calling a tool method directly is never blocked by a form-text mistake.
+
+* **This is where ``Annotated`` is stripped.** ParamInfo stores the bare runtime
+  type, so widget selection and value conversion never see metadata. ``F``
+  metadata is read out separately, in a second pass.
+
+Sorting happens at the end: toolsets and their tools are ordered by label,
+case-insensitively. The order classes are passed in does not survive.
+"""
 from __future__ import annotations
 
 import inspect
@@ -16,6 +37,20 @@ HintMap: TypeAlias = dict[str, Any]
 
 @dataclass
 class ToolInfo:
+    """Everything the UI needs to render and run one @tool method.
+
+    Built once at startup and then read-only. Field names mirror the ``@tool``
+    arguments, except for the four at the top, which are derived.
+
+    Attributes:
+        tool_id: Stable identity, ``'ClassName.method_name'``. Used as the
+            history key, so renaming a class or method orphans its past runs.
+        method_name: The attribute name on the toolset class.
+        method: The unbound function. Called as ``method(instance, **params)``.
+        return_annotation: Captured but currently unused -- the GUI does not
+            render return values.
+    """
+
     tool_id: str          # 'ClassName.method_name'
     method_name: str
     method: Any           # unbound function
@@ -32,10 +67,27 @@ class ToolInfo:
     defaults: Any = None
     completion_debounce_ms: int = DEFAULT_DEBOUNCE_MS
     labels: dict[str, str] = field(default_factory=dict)
+    on_cancel: Any = None
 
 
 @dataclass
 class ParamInfo:
+    """One parameter of a tool, as the form builder sees it.
+
+    Attributes:
+        name: The parameter name, and the key used everywhere else -- in
+            ``placeholders``, ``completions``, replayed history, and the params
+            dict the method is finally called with.
+        annotation: The bare runtime type. ``Annotated`` is stripped and
+            ``Optional`` is left intact here; the widget builder unwraps it.
+        default: The declared default, or ``inspect.Parameter.empty``.
+        has_default: False marks the field required, which is what draws the red
+            asterisk in the form. It does not stop the tool from running.
+        placeholder: Already resolved through the decorator/F/empty chain.
+        label: Already resolved through the decorator/F/parameter-name chain.
+            None means fall back to ``name`` at render time.
+    """
+
     name: str
     annotation: Any       # Annotated metadata stripped; the bare runtime type
     default: Any          # inspect.Parameter.empty if no default
@@ -46,6 +98,16 @@ class ParamInfo:
 
 @dataclass
 class ToolSetInfo:
+    """One @toolset class and the tools found on it.
+
+    Attributes:
+        cls: The decorated class itself. decoui instantiates it once, with no
+            arguments, and keeps that single instance for the whole session.
+        tags: Sidebar filter labels. Filtering hides the group; it does not
+            unload it.
+        tools: Sorted by label, case-insensitively.
+    """
+
     cls: type
     label: str
     tags: list[str]
@@ -103,7 +165,27 @@ def _resolve_hints(method: Callable[..., Any]) -> tuple[HintMap, HintMap]:
 
 
 def build_tree(*toolset_classes) -> list[ToolSetInfo]:
-    """Scan classes decorated with @toolset and return a ToolTree."""
+    """Scan classes decorated with @toolset and return a ToolTree.
+
+    Args:
+        *toolset_classes: Classes carrying @toolset metadata.
+
+    Returns:
+        One ToolSetInfo per class, sorted by label, each holding its tools
+        sorted by label.
+
+    Raises:
+        ValueError: If a class is not decorated with @toolset, or a declaration
+            names a parameter the method does not have.
+        TypeError: If a declaration has an unusable type -- a non-str label, a
+            completions spec on a numeric field, and so on.
+        AttributeError: If a declaration names a method the class does not have.
+
+    Note:
+        Nothing here touches Qt, and no instance is created: this runs on plain
+        classes. It is therefore safe to call from a test to assert that an
+        application's declarations are consistent.
+    """
     tree: list[ToolSetInfo] = []
 
     for cls in toolset_classes:
@@ -158,13 +240,17 @@ def build_tree(*toolset_classes) -> list[ToolSetInfo]:
             completions = tool_meta.get("completions", {})
             cascade = tool_meta.get("cascade", {})
             defaults = tool_meta.get("defaults")
+            on_cancel = tool_meta.get("on_cancel")
             validate_assist_config(
                 tool_label=tool_meta["label"],
                 cls=cls,
                 params=params,
+                placeholders=placeholders,
+                labels=labels,
                 completions=completions,
                 cascade=cascade,
                 defaults=defaults,
+                on_cancel=on_cancel,
             )
 
             ts.tools.append(ToolInfo(
@@ -186,6 +272,7 @@ def build_tree(*toolset_classes) -> list[ToolSetInfo]:
                     "completion_debounce_ms", DEFAULT_DEBOUNCE_MS
                 ),
                 labels=labels,
+                on_cancel=on_cancel,
             ))
 
         ts.tools.sort(key=lambda t: t.label.casefold())

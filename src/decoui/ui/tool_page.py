@@ -54,9 +54,50 @@ _STATUS_STYLES = {
 
 
 class ToolPage(QWidget):
+    """One tool rendered as a page: parameter form, run controls, console.
+
+    This is what a ``@tool`` method turns into. The layout is derived entirely
+    from the tool's metadata -- there is no place for a tool author to inject
+    widgets, and none is needed.
+
+    What the user gets, and where it comes from:
+
+    ==============================  =========================================
+    Form fields                     parameter annotations, via widget_builder
+    Field labels / placeholders      ``labels`` / ``placeholders`` / ``F``
+    Red asterisk                     parameter has no default
+    Confirmation dialog              ``@tool(confirm=True)``
+    Progress bar                     :func:`decoui.progress`
+    Console                          the tool's ``print`` and ``logging``
+    Stop button                      cancels; runs ``on_cancel`` first
+    Replay                           the run history for this tool
+    ==============================  =========================================
+
+    The tool's return value is deliberately not shown anywhere on this page.
+
+    Attributes:
+        history_requested: Emitted with the tool id when Replay is pressed, so
+            the main window can open the History page filtered to this tool.
+    """
+
     history_requested = Signal(str)   # emits tool_id
 
     def __init__(self, tool_info: ToolInfo, instance, parent=None, assist_runner=None):
+        """Build the page for one tool and wire it to its own execution engine.
+
+        Args:
+            tool_info: The tool to render.
+            instance: The toolset instance its method is called on. The same
+                instance is used for every assist callback and for on_cancel.
+            parent: Qt parent widget.
+            assist_runner: Strategy used to run completion callbacks. Defaults
+                to the standard runner; tests substitute a synchronous one.
+
+        Note:
+            Each page owns a private ExecutionEngine, so pages run
+            independently. Two pages can therefore run tools at the same time --
+            see :mod:`decoui.engine.worker` for what that means for stdout.
+        """
         super().__init__(parent)
         self._tool = tool_info
         self._instance = instance
@@ -74,10 +115,12 @@ class ToolPage(QWidget):
         self._setup_assist()
         self._engine.log_line.connect(self._append_log)
         self._engine.finished.connect(self._on_finished)
+        self._engine.progress.connect(self._on_progress)
 
     # ── UI construction ───────────────────────────────────────────────────────
 
     def _build_ui(self):
+        """Assemble the header, parameter form, controls and console."""
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 12, 16, 12)
         root.setSpacing(8)
@@ -280,6 +323,7 @@ class ToolPage(QWidget):
     # ── Animation ─────────────────────────────────────────────────────────────
 
     def _collapse_params(self):
+        """Animate the parameter panel shut, as happens when a run starts."""
         self._anim = QPropertyAnimation(self._param_panel, b"maximumHeight")
         self._anim.setDuration(200)
         self._anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
@@ -290,6 +334,7 @@ class ToolPage(QWidget):
         self._param_toggle_btn.setText("▶ Parameters")
 
     def _expand_params(self):
+        """Animate the parameter panel open again."""
         self._anim = QPropertyAnimation(self._param_panel, b"maximumHeight")
         self._anim.setDuration(200)
         self._anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
@@ -300,6 +345,7 @@ class ToolPage(QWidget):
         self._param_toggle_btn.setText("▼ Parameters")
 
     def _toggle_params(self):
+        """Open or close the parameter panel to match the toggle button."""
         if self._param_toggle_btn.isChecked():
             self._expand_params()
         else:
@@ -308,6 +354,13 @@ class ToolPage(QWidget):
     # ── Slots ─────────────────────────────────────────────────────────────────
 
     def _on_run(self):
+        """Confirm, read and coerce the form, then start the run.
+
+        Nothing starts if coercion fails: the errors are printed to the console
+        as ERROR entries and the form stays editable. This is the only place a
+        parameter type mismatch is reported -- the tool body never sees a value
+        it did not ask for.
+        """
         if self._tool.confirm:
             reply = QMessageBox.question(
                 self, "Confirm", f"Run '{self._tool.label}'?",
@@ -338,9 +391,36 @@ class ToolPage(QWidget):
 
         self._engine.run(self._tool, self._instance, params)
 
+    def _on_progress(self, done: int, total: int, message: str) -> None:
+        """Show progress reported by the running tool.
+
+        Args:
+            done: Units completed so far.
+            total: Total units, or 0 when unknown. 0 keeps the bar in its
+                indeterminate state so a tool that only sends messages does not
+                pin the bar at zero.
+            message: Status text, shown in place of "Running…" when non-empty.
+        """
+        if total > 0:
+            self._progress.setRange(0, total)
+            self._progress.setValue(done)
+        if message:
+            self._status_label.setText(message)
+
     def _on_finished(self, _result: Any, status: str):
+        """Restore the idle state and show how the run ended.
+
+        Args:
+            _result: The tool's return value. Deliberately unused -- decoui
+                does not render return values; the engine has already recorded
+                it in the run history.
+            status: ``'success'``, ``'error'`` or ``'cancelled'``.
+        """
         elapsed = time.monotonic() - self._start_time
         self._progress.setVisible(False)
+        # Back to indeterminate, so the next run does not start from the last
+        # run's percentage.
+        self._progress.setRange(0, 0)
         self._run_btn.setVisible(True)
         self._run_btn.setText("▶  Run Again")
         self._stop_btn.setVisible(False)
@@ -357,6 +437,12 @@ class ToolPage(QWidget):
             self._status_label.setStyleSheet(_STATUS_STYLES["cancelled"])
 
     def _append_log(self, level: str, message: str):
+        """Append one coloured line to the console.
+
+        Args:
+            level: ``'stdout'`` or a logging level name; selects the colour.
+            message: The line text.
+        """
         self._log_records.append(LogEntry(level, message))
 
         color = LEVEL_COLORS.get(level, "#FFFFFF")
@@ -372,23 +458,43 @@ class ToolPage(QWidget):
         self._console.ensureCursorVisible()
 
     def _copy_console(self):
+        """Copy the whole console to the clipboard."""
         QApplication.clipboard().setText(self._console.toPlainText())
 
     def _expand_console(self):
+        """Open the current output in a separate, filterable log window."""
         win = LogWindow(self._tool.label, list(self._log_records))
         win.show()
         self._open_log_windows.append(win)
 
     def _reset_params(self):
+        """Clear the console and reopen the form.
+
+        Parameter values are kept: Reset undoes the run, not the input.
+        """
         self._console.clear()
         self._log_records.clear()
         self._expand_params()
 
     def _set_params_readonly(self, readonly: bool):
+        """Lock or unlock the form while a run is in flight.
+
+        Args:
+            readonly: True disables the panel and suspends assist callbacks, so
+                a cascade cannot fire against a form the user cannot see.
+        """
         self._param_panel.setEnabled(not readonly)
         self._set_assist_suspended(readonly)
 
     def restore_params(self, param_map: dict[str, Any]):
+        """Refill the form from a past run, for Replay.
+
+        Args:
+            param_map: Parameter name to value, as recovered from history.
+                Unknown names are ignored and a value the widget rejects is
+                skipped, so a replay never fails outright after a signature
+                change -- it just restores what still fits.
+        """
         # Cascades stay suspended for the whole restore: recomputing derived
         # fields here would overwrite the very values being replayed.
         self._set_assist_suspended(True)

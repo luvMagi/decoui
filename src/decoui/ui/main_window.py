@@ -1,4 +1,18 @@
-"""Main window with persistent sidebar layout and tabbed tool pages."""
+"""Main window with persistent sidebar layout and tabbed tool pages.
+
+Holds the tag bar, the searchable sidebar and a tab area of open tool pages,
+plus the shared History page. Sidebar width and window geometry are persisted in
+the ``app_setting`` table and restored on the next launch.
+
+Two behaviours worth knowing when writing tools:
+
+* **Each toolset is instantiated once** and that single instance backs every
+  page built from it, for the whole session. Instance state set in ``__init__``
+  or ``on_startup()`` is therefore shared between a toolset's tools -- and
+  outlives any individual run.
+* **Closing a tab does not stop a running tool.** The page and its execution
+  engine keep going; the run finishes and is recorded as usual.
+"""
 from __future__ import annotations
 
 from PySide6.QtCore import QPoint, QSize, Qt, QTimer

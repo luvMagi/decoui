@@ -35,9 +35,20 @@ _DEFAULT_COLOR = "#FFFFFF"
 
 
 class LogWindow(QMainWindow):
+    """Standalone, filterable view of one run's console output.
+
+    Opened from a tool page ("View Log") or from a history row. It holds a copy
+    of the lines, so filtering here never disturbs the page it came from.
+    """
     """Independent resizable log viewer with level filtering and search."""
 
     def __init__(self, title: str, logs):
+        """Show the given lines with every level enabled.
+
+        Args:
+            title: Window title, normally the tool label.
+            logs: The LogEntry sequence to display.
+        """
         super().__init__(parent=None)
         self.setWindowTitle(f"Log — {title}")
         self.resize(820, 580)
@@ -109,6 +120,7 @@ class LogWindow(QMainWindow):
         self._rerender()
 
     def _select_all_levels(self):
+        """Enable every level filter."""
         self._active_levels = set(_ALL_LEVELS)
         for btn in self._level_btns.values():
             btn.setChecked(True)
@@ -122,6 +134,12 @@ class LogWindow(QMainWindow):
         self._rerender()
 
     def _toggle_level(self, level: str, checked: bool):
+        """Show or hide one log level.
+
+        Args:
+            level: The level whose button was clicked.
+            checked: Its new state.
+        """
         if checked:
             self._active_levels.add(level)
         else:
@@ -129,6 +147,7 @@ class LogWindow(QMainWindow):
         self._rerender()
 
     def _rerender(self):
+        """Redraw the console from the entries the active filters allow."""
         query = self._search.text().lower()
         self._console.clear()
         cursor = self._console.textCursor()
@@ -146,5 +165,6 @@ class LogWindow(QMainWindow):
         self._console.setTextCursor(cursor)
 
     def _copy_all(self):
+        """Copy the currently visible lines to the clipboard."""
         from PySide6.QtWidgets import QApplication
         QApplication.clipboard().setText(self._console.toPlainText())

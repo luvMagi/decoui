@@ -87,6 +87,69 @@ def test_completions_unknown_parameter_is_rejected() -> None:
     assert "service" in str(excinfo.value)
 
 
+@pytest.mark.parametrize("where", ["placeholders", "labels"])
+def test_text_map_unknown_parameter_is_rejected(where: str) -> None:
+    """Verify a misspelled placeholders/labels key fails at startup.
+
+    These two maps used to be skipped by validation entirely, so a typo left
+    the text silently unused with no error anywhere.
+    """
+
+    @toolset(label="Assist")
+    class AssistTools:
+
+        @tool(label="Deploy", **{where: {"servcie": "hint"}})
+        def deploy(self, service: str = "") -> None:
+            pass
+
+    with pytest.raises(ValueError) as excinfo:
+        build_tree(AssistTools)
+
+    message = str(excinfo.value)
+    assert where in message
+    assert "servcie" in message
+    assert "service" in message
+
+
+@pytest.mark.parametrize("where", ["placeholders", "labels"])
+def test_text_map_rejects_non_str_value(where: str) -> None:
+    """Verify a non-str placeholder/label is rejected while the tool is known.
+
+    Without this the value reaches the form builder and fails there instead,
+    where the traceback no longer names the tool that declared it.
+    """
+
+    @toolset(label="Assist")
+    class AssistTools:
+
+        @tool(label="Deploy", **{where: {"service": 123}})
+        def deploy(self, service: str = "") -> None:
+            pass
+
+    with pytest.raises(TypeError) as excinfo:
+        build_tree(AssistTools)
+
+    message = str(excinfo.value)
+    assert f"{where}['service']" in message
+    assert "int" in message
+
+
+@pytest.mark.parametrize("where", ["placeholders", "labels"])
+def test_text_map_accepts_real_parameter_names(where: str) -> None:
+    """Verify correct keys still build, so validation only rejects mistakes."""
+
+    @toolset(label="Assist")
+    class AssistTools:
+
+        @tool(label="Deploy", **{where: {"service": "web"}})
+        def deploy(self, service: str = "") -> None:
+            pass
+
+    info = _single_tool(AssistTools)
+
+    assert info.params[0].name == "service"
+
+
 def test_cascade_unknown_parameter_is_rejected() -> None:
     """Verify a misspelled cascade key fails at startup."""
 

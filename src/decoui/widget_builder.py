@@ -1,14 +1,53 @@
 """Map native Python type annotations to PySide6 widgets.
 
-Supported types:
-  str            → QLineEdit
-  int            → QSpinBox
-  float          → QDoubleSpinBox
-  bool           → QCheckBox
-  list / list[X] → QTextEdit (comma- and newline-separated)
-  dict           → QTextEdit (JSON / ast.literal_eval, raises on bad input)
-  enum.Enum      → QComboBox (dropdown)
-  pathlib.Path   → QLineEdit + file-picker + folder-picker buttons
+This module is the contract between a tool's signature and its form. Annotating
+a parameter is the *only* way to choose its widget -- there is no widget
+argument, no builder DSL, and nothing in ``@tool`` overrides what is decided
+here.
+
+Supported types::
+
+    str            -> QLineEdit
+    int            -> QSpinBox
+    float          -> QDoubleSpinBox
+    bool           -> QCheckBox
+    list / list[X] -> QTextEdit (comma- and newline-separated)
+    dict           -> QTextEdit (JSON / ast.literal_eval, raises on bad input)
+    enum.Enum      -> QComboBox (dropdown)
+    pathlib.Path   -> QLineEdit + file-picker + folder-picker buttons
+
+Rules that decide what a tool actually receives
+-----------------------------------------------
+
+* **Anything unrecognised becomes a QLineEdit and is passed through as a str.**
+  There is no error and no warning. A parameter annotated ``datetime``,
+  ``set[str]``, a dataclass, or one of the marker types in :mod:`decoui.types`
+  reaches the method as whatever the user typed. Annotate parameters with the
+  types in the table above and convert inside the method if you need more.
+
+* **Only single-Optional unions are unwrapped.** ``Optional[Path]`` and
+  ``Path | None`` build the path widget; ``int | str`` has two non-None members,
+  so it falls through to the text field.
+
+* ``bool`` is checked before ``int`` on purpose -- ``bool`` is a subclass of
+  ``int``, and testing in the other order would give every checkbox a spin box.
+
+* ``Annotated[X, ...]`` never reaches this module. The registry strips it and
+  stores the bare ``X``, so metadata cannot influence widget choice.
+
+* **A list field cannot hold values containing commas.** The text is split on
+  newlines *and* on commas (ASCII and fullwidth), then blanks are dropped.
+
+* **An empty path field is not None.** ``pathlib.Path("")`` would be falsy, so
+  an empty field becomes ``Path()`` -- which is ``Path('.')``, the current
+  directory. Check for it explicitly if a tool treats "no path" as a case.
+
+* **An Enum parameter receives the member**, not its name: the combo box stores
+  the member as item data and hands it back untouched.
+
+* Conversion failures never abort a run before it starts in silence: they are
+  collected by :func:`coerce_params`, printed to the console as ERROR entries,
+  and the run is refused. The offending value is left uncoerced in the dict.
 """
 from __future__ import annotations
 
@@ -34,9 +73,13 @@ from PySide6.QtWidgets import (
 
 
 # ── Marker subclass to distinguish dict QTextEdit from list QTextEdit ─────────
+#
+# dict and list both render as a QTextEdit, but their values are read back in
+# completely different ways (JSON object vs. split-and-strip list). get_value()
+# has only the widget to go on, so the dict case needs its own class.
 
 class _DictTextEdit(QTextEdit):
-    pass
+    """QTextEdit that reads back as a dict rather than a list of lines."""
 
 
 # ── Path widget: QLineEdit + file-picker + folder-picker ──────────────────────
@@ -52,6 +95,11 @@ class _PathWidget(QWidget):
     committed = Signal()
 
     def __init__(self, parent=None):
+        """Build the line edit and its two picker buttons.
+
+        Args:
+            parent: Qt parent widget.
+        """
         super().__init__(parent)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -74,30 +122,55 @@ class _PathWidget(QWidget):
         layout.addWidget(self._dir_btn)
 
     def _pick_file(self):
+        """Open a file dialog and adopt the chosen path."""
         path, _ = QFileDialog.getOpenFileName(self, "Select File", self._edit.text())
         if path:
             self._edit.setText(path)
             self.committed.emit()
 
     def _pick_dir(self):
+        """Open a directory dialog and adopt the chosen path."""
         path = QFileDialog.getExistingDirectory(self, "Select Folder", self._edit.text())
         if path:
             self._edit.setText(path)
             self.committed.emit()
 
     def text(self) -> str:
+        """Return the path text, matching the QLineEdit interface."""
         return self._edit.text()
 
     def setText(self, text: str) -> None:
+        """Replace the path text.
+
+        Args:
+            text: The path to show.
+        """
         self._edit.setText(text)
 
     def setPlaceholderText(self, text: str) -> None:
+        """Set the hint shown while the path is empty.
+
+        Args:
+            text: The placeholder text.
+        """
         self._edit.setPlaceholderText(text)
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def build_widget(param_info, parent=None) -> QWidget:
+    """Create the input widget for one parameter.
+
+    Args:
+        param_info: The ParamInfo built by the registry. Its ``annotation`` is
+            already stripped of ``Annotated`` wrappers.
+        parent: Qt parent for the new widget.
+
+    Returns:
+        A widget whose value is read with :func:`get_value` and written with
+        :func:`set_value`. Never None: an unrecognised annotation yields a
+        QLineEdit rather than an error.
+    """
     ann = param_info.annotation
     default = param_info.default if param_info.has_default else inspect.Parameter.empty
     placeholder = param_info.placeholder
@@ -112,6 +185,21 @@ def build_widget(param_info, parent=None) -> QWidget:
 
 
 def get_value(widget: QWidget) -> Any:
+    """Read the current value out of a widget built by :func:`build_widget`.
+
+    The result is still raw: it matches the widget, not the annotation. A spin
+    box gives an int, but a QLineEdit standing in for a Path gives a str.
+    :func:`coerce_params` is what turns these into the declared types.
+
+    Args:
+        widget: A widget produced by :func:`build_widget`.
+
+    Returns:
+        The widget's value, or None for a widget type this module did not
+        build.
+    """
+    # Order matters here as well: _DictTextEdit and _PathWidget must be tested
+    # before their base classes further down.
     if isinstance(widget, QCheckBox):
         return widget.isChecked()
     if isinstance(widget, QSpinBox):
@@ -125,6 +213,9 @@ def get_value(widget: QWidget) -> Any:
     if isinstance(widget, _DictTextEdit):
         return _parse_dict(widget.toPlainText().strip())
     if isinstance(widget, QTextEdit):
+        # The plain (non-dict) QTextEdit is the list field. Split on newlines and
+        # on both comma characters, strip, drop blanks -- which also means a list
+        # item can never contain a comma.
         raw = widget.toPlainText()
         items = [s.strip() for part in raw.splitlines() for s in re.split(r"[,，]", part)]
         return [x for x in items if x]
@@ -134,6 +225,17 @@ def get_value(widget: QWidget) -> Any:
 
 
 def set_value(widget: QWidget, value: Any) -> None:
+    """Write a value into a widget, converting as the widget requires.
+
+    Used for defaults, for cascade results and for replaying a past run's
+    parameters. Values that do not fit are coerced rather than rejected: a combo
+    box ignores a member it does not have, and anything else falls back to
+    ``str(value)``.
+
+    Args:
+        widget: A widget produced by :func:`build_widget`.
+        value: The value to display. None becomes an empty field.
+    """
     if isinstance(widget, _PathWidget):
         widget.setText(str(value) if value is not None else "")
         return
@@ -206,7 +308,26 @@ def supports_completion(annotation: Any) -> bool:
 
 
 def coerce_params(tool_info, raw: dict) -> tuple[dict, list[str]]:
-    """Cast widget values to the types declared in the method signature."""
+    """Cast widget values to the types declared in the method signature.
+
+    This is what makes a tool receive a real ``Path``, ``int`` or Enum member
+    rather than the string the user typed.
+
+    Args:
+        tool_info: The ToolInfo whose params describe the target types.
+        raw: Widget values keyed by parameter name, from :func:`get_value`.
+
+    Returns:
+        A ``(coerced, errors)`` pair. ``errors`` holds one formatted traceback
+        per parameter that could not be cast; a non-empty list means the caller
+        must refuse to run. Failed parameters keep their raw value in
+        ``coerced``, so the dict is always complete.
+
+    Note:
+        An unannotated parameter, or one annotated ``str``, is passed through
+        untouched. Empty path fields become ``Path()`` -- the current directory,
+        not None.
+    """
     import traceback
     from typing import get_args, get_origin
 
@@ -269,6 +390,16 @@ def coerce_params(tool_info, raw: dict) -> tuple[dict, list[str]]:
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 def _unwrap_optional(ann) -> Any:
+    """Reduce ``Optional[X]`` / ``X | None`` to ``X``.
+
+    Args:
+        ann: Any annotation.
+
+    Returns:
+        The single non-None member of a two-member union, or the annotation
+        unchanged. A union with two or more real types is left alone and will
+        therefore fall through to the text field.
+    """
     import types as _types
     origin = get_origin(ann)
     args = get_args(ann)
@@ -280,6 +411,19 @@ def _unwrap_optional(ann) -> Any:
 
 
 def _build_for_type(ann, default, parent) -> QWidget:
+    """Pick and construct the widget for one resolved annotation.
+
+    Args:
+        ann: The annotation, already unwrapped of Optional.
+        default: The parameter's default, or ``inspect.Parameter.empty``.
+        parent: Qt parent for the new widget.
+
+    Returns:
+        The widget for this type, pre-filled with the default when there is one.
+        Falls back to a QLineEdit for every type not listed below -- including
+        every ``str`` subclass, which is why the marker types in
+        :mod:`decoui.types` do not select widgets.
+    """
     import json
 
     # pathlib.Path → _PathWidget
@@ -392,5 +536,16 @@ def _parse_dict(raw: str) -> dict:
 
 
 def _apply_placeholder(widget: QWidget, text: str) -> None:
+    """Set placeholder text on the widgets that can show it.
+
+    Args:
+        widget: Any widget built here.
+        text: The placeholder to show while the field is empty.
+
+    Note:
+        Silently does nothing for check boxes, spin boxes and combo boxes, which
+        have nowhere to put it -- a placeholder declared for such a parameter is
+        accepted by validation and then ignored.
+    """
     if isinstance(widget, (_PathWidget, QLineEdit, QTextEdit)):
         widget.setPlaceholderText(text)

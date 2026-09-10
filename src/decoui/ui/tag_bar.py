@@ -28,9 +28,22 @@ _PILL_STYLE = (
 
 
 class TagBar(QWidget):
+    """Row of toggle pills, one per tag declared by any @toolset.
+
+    Attributes:
+        tags_changed: Emitted with the set of active tags whenever a pill is
+            toggled. The sidebar treats the set as an AND filter.
+    """
+
     tags_changed = Signal(set)   # set of active tag strings
 
     def __init__(self, all_tags: list[str], parent=None):
+        """Build one pill per tag.
+
+        Args:
+            all_tags: Every tag found across the loaded toolsets.
+            parent: Qt parent widget.
+        """
         super().__init__(parent)
         self._active: set[str] = set()
         self._buttons: dict[str, QPushButton] = {}
@@ -79,6 +92,12 @@ class TagBar(QWidget):
         outer.addWidget(scroll)
 
     def _toggle_tag(self, tag: str, checked: bool):
+        """Add or remove one tag from the active set.
+
+        Args:
+            tag: The tag whose pill was clicked.
+            checked: Its new state.
+        """
         if checked:
             self._active.add(tag)
         else:
@@ -87,6 +106,7 @@ class TagBar(QWidget):
         self.tags_changed.emit(set(self._active))
 
     def _clear_all(self):
+        """Deselect every pill, restoring the unfiltered sidebar."""
         self._active.clear()
         for btn in self._buttons.values():
             btn.setChecked(False)
