@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
@@ -14,18 +15,25 @@ from decoui.assist import CompletionController, InlineRunner
 
 
 @pytest.fixture()
-def line_edit(qt_app: QApplication) -> QLineEdit:
+def line_edit(qt_app: QApplication) -> Iterator[QLineEdit]:
     """Provide a focused line edit for completer tests.
+
+    The widget is torn down explicitly: a shown top-level widget that is only
+    dropped by the garbage collector leaves posted events behind, and those are
+    delivered to freed memory the next time a test spins the event loop.
 
     Args:
         qt_app: The shared QApplication.
 
-    Returns:
+    Yields:
         A visible QLineEdit ready to receive a completer.
     """
     widget = QLineEdit()
     widget.show()
-    return widget
+    yield widget
+    widget.hide()
+    widget.deleteLater()
+    qt_app.processEvents()
 
 
 def _controller(
