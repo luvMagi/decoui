@@ -50,10 +50,11 @@ Note:
     entry and nothing else. Everything the user sees comes from ``print()`` or
     ``logging``.
 
-    Four exported names are **not** demonstrated here on purpose: ``Text``,
-    ``FilePath``, ``DirPath`` and ``Choice`` look like they select widgets and
-    do not -- see :mod:`decoui.types`. Use ``list``, ``pathlib.Path`` and an
-    ``Enum`` instead, as this package does.
+    **Every widget is chosen by a native type.** ``list``, ``pathlib.Path`` and
+    an ``Enum`` are what this package annotates with, because they are what
+    decoui reads. There is no marker type to import and no builder to call --
+    the four that once looked like there were (``Text``, ``FilePath``,
+    ``DirPath``, ``Choice``) never did anything and were removed in 1.1.0.
 """
 
 from pathlib import Path
@@ -62,9 +63,9 @@ from .assist import AssistTools
 from .fields import Archive, FieldTools, LogLevel
 from .running import RunTools
 
-#: The three toolsets, in the order the modules above introduce them. The list
-#: decides *what* loads, not the order it appears in -- the sidebar is always
-#: sorted by label.
+#: The three toolsets, in the order the modules above introduce them -- and, by
+#: default, the order the sidebar lists them in. Pass ``order="label"`` to
+#: gui_main() to sort alphabetically instead.
 TOOLSETS = [FieldTools, RunTools, AssistTools]
 
 #: Where this package keeps its own translations, one <language>.json per

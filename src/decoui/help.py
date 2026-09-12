@@ -281,7 +281,7 @@ class ToolSetHelp:
         label: Group name.
         summary: Class docstring summary line.
         description: Class docstring prose.
-        tools: The group's tools, in the order build_tree sorted them.
+        tools: The group's tools, in the order build_tree put them in.
     """
 
     set_id: str
@@ -455,7 +455,7 @@ def build_help(tree: list) -> list[ToolSetHelp]:
         tree: The toolset tree from :func:`decoui.registry.build_tree`.
 
     Returns:
-        One entry per toolset, in the order the tree already sorted them, so
+        One entry per toolset, in the order the tree already put them in, so
         the Help panel and the sidebar agree.
     """
     result: list[ToolSetHelp] = []

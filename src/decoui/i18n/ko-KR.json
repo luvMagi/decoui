@@ -29,6 +29,11 @@
   "tool.replay": "매개변수 재사용",
   "tool.output": "출력",
   "tool.copy": "복사",
+  "tool.copy_result": "결과 복사",
+  "tool.send_result": "결과 보내기",
+  "tool.result_none": "이번 실행에는 반환값이 없습니다.",
+  "tool.result_banner": "결과",
+  "tool.send_result_tooltip": "이 결과를 다른 도구의 입력란으로 보냅니다",
   "tool.view_log": "로그 보기",
   "tool.running": "실행 중…",
   "tool.done": "완료 ({elapsed}s)",
@@ -123,6 +128,9 @@
 
   "tool_i18n.problem_source": "번역",
   "tool_i18n.problem_summary": "도구 번역 파일을 읽을 수 없어 번역되지 않은 텍스트를 사용합니다",
+  "field_routing.problem_source": "필드 연계",
+  "field_routing.problem_summary": "도구가 필드 {field_id}을(를) 생성하지만 받는 쪽이 없습니다",
+
   "theme.problem_source": "테마",
   "theme.problem_summary": "테마를 불러오지 못했습니다. 기본 라이트 테마로 대체합니다"
 }

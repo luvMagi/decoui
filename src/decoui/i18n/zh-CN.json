@@ -29,6 +29,11 @@
   "tool.replay": "复用参数",
   "tool.output": "输出",
   "tool.copy": "复制",
+  "tool.copy_result": "复制返回值",
+  "tool.send_result": "发送返回值",
+  "tool.result_none": "这次运行没有返回值。",
+  "tool.result_banner": "结果",
+  "tool.send_result_tooltip": "把这个返回值送进另一个工具的输入框",
   "tool.view_log": "查看日志",
   "tool.running": "运行中…",
   "tool.done": "完成 ({elapsed}s)",
@@ -123,6 +128,9 @@
 
   "tool_i18n.problem_source": "翻译",
   "tool_i18n.problem_summary": "无法读取工具翻译文件；将使用未翻译文本",
+  "field_routing.problem_source": "字段传递",
+  "field_routing.problem_summary": "有工具产出字段 {field_id}，但没有任何参数接收它",
+
   "theme.problem_source": "主题",
   "theme.problem_summary": "主题加载失败；已回退到浅色主题"
 }

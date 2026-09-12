@@ -40,7 +40,12 @@ from .theme import (
     theme_font,
     with_font_family,
 )
-from .registry import build_tree
+from .registry import (
+    ORDER_DECLARATION,
+    build_tree,
+    unconsumed_field_ids,
+    validate_order,
+)
 from .storage.db import get_setting, init_db, set_db_path
 
 
@@ -53,6 +58,8 @@ def gui_main(
     theme_dir: str | Path | None = None,
     language: str | None = None,
     i18n_dir: str | Path | None = None,
+    order: str = ORDER_DECLARATION,
+    print_result: bool = False,
 ) -> None:
     """Launch the decoui GUI application.
 
@@ -91,9 +98,10 @@ def gui_main(
             classes named here and need no ``# noqa: F401``. When omitted,
             every @toolset class visible to the caller is discovered.
 
-            The list order does not reach the navigation tree: build_tree()
-            sorts toolsets and tools by label. Pass an explicit list to
-            control *what* loads, not what order it appears in.
+            This list is also the sidebar's order, unless ``order="label"``
+            overrides it. Discovery orders by where the classes appear in the
+            calling namespace, which is import order -- pass an explicit list
+            when that matters.
         theme: Id of the theme to start under. This is the application's
             *default*, not a lock: a theme the user picked in Settings wins
             over it, the same way db_path names a location while the data in it
@@ -116,12 +124,44 @@ def gui_main(
 
             A missing directory, or a missing file for the running language, is
             not an error: the strings written in the source are used.
+        order: How the sidebar is ordered.
+
+            ``"declaration"``, the default, is the order the source reads in:
+            toolsets as ``toolsets`` lists them, and each one's tools in the
+            order their ``def`` statements appear in the class body. Moving a
+            method moves its entry, which is the point -- the grouping an author
+            wrote is usually the grouping a user wants.
+
+            ``"label"`` sorts both alphabetically, case-insensitively. This is
+            what decoui did unconditionally up to v1.0.0, and is worth asking
+            for when the labels are a flat list people look things up in rather
+            than a sequence anyone works through.
+
+            Either way the history page's tool filter stays alphabetical: it is
+            a lookup control, not a map of the application.
+        print_result: Whether a successful run prints its return value to the
+            console, under a ``========== Result ==========`` rule. Off by
+            default, which is what decoui has always done; turning it on saves
+            writing ``print(result)`` at the end of every tool.
+
+            Unlike ``theme`` and ``language``, this is not a default the user
+            can overrule -- there is no Settings entry for it. Those two
+            describe how the application looks to whoever is sitting there;
+            this one says whether a tool's output is complete without its
+            return value, which only the author of the tools knows. A single
+            tool may still disagree via ``@tool(print_result=...)``.
 
     Raises:
         RuntimeError: If no @toolset class is visible in the calling namespace,
             or if ``toolsets`` is an empty sequence.
         TypeError: If ``toolsets`` holds anything that is not a @toolset class.
+        ValueError: If ``order`` is neither ``"declaration"`` nor ``"label"``.
     """
+    # Before anything else, including the QApplication: a misspelled order is a
+    # typo in the entry point, and it should read like one rather than like a
+    # failure halfway through startup.
+    validate_order(order)
+
     if db_path is not None:
         set_db_path(Path(db_path))
 
@@ -171,7 +211,26 @@ def gui_main(
         for detail in load_catalogue(i18n_dir, active_language())
     ]
 
-    tree = build_tree(*toolset_classes)
+    tree = build_tree(*toolset_classes, order=order)
+
+    # A produced field nobody consumes is reported rather than raised: writing
+    # the producer before its consumer is a normal order to work in, and the
+    # only cost of the mistake is a Send button that does not appear. Saying so
+    # is what keeps that from being a silent nothing.
+    problems += [
+        StartupProblem(
+            source=t("field_routing.problem_source"),
+            summary=t("field_routing.problem_summary", field_id=field_id),
+            detail=(
+                f"F(id={field_id!r}) is declared on a tool's return value, but "
+                f"no parameter in this application declares it. Nothing can be "
+                f"sent anywhere, so no Send button is shown for that tool.\n\n"
+                f"Either annotate the receiving parameter with the same id, or "
+                f"check the id for a typo."
+            ),
+        )
+        for field_id in unconsumed_field_ids(tree)
+    ]
 
     # Startup hooks run here, before show(): whatever they cost is time the
     # user spends looking at nothing. Nothing below starts the event loop, so
@@ -185,7 +244,9 @@ def gui_main(
     tree = [ts for ts in tree if ts.cls in instances]
 
     from .ui.main_window import MainWindow
-    window = MainWindow(tree, title=title, instances=instances)
+    window = MainWindow(
+        tree, title=title, instances=instances, print_result=print_result
+    )
     window.show()
     _show_startup_problems(problems, window)
 
@@ -360,8 +421,9 @@ def _run_toolset_hooks(instances: dict[type, object]) -> list[StartupProblem]:
     its tools still open with fallback values -- which is the whole reason to
     keep ``__init__`` trivial.
 
-    Order between toolsets follows build_tree()'s alphabetical sort and must not
-    be relied on; cross-toolset setup belongs in the application hook.
+    Order between toolsets follows whatever build_tree() produced -- declaration
+    order by default, alphabetical under ``order="label"`` -- and must not be
+    relied on either way; cross-toolset setup belongs in the application hook.
 
     Args:
         instances: Toolset instances created by _create_instances().

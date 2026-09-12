@@ -15,7 +15,8 @@ class NavTree(QWidget):
     """Searchable sidebar listing every toolset and its tools.
 
     Groups come from ``@toolset(label=...)``, leaves from ``@tool(label=...)``,
-    both already sorted by label in the registry. Search and tag filters only
+    both already ordered by the registry -- as declared by default, by label
+    under ``gui_main(order="label")``. Search and tag filters only
     hide rows -- nothing is unloaded, and a hidden tool is still reachable
     through history replay.
     """

@@ -2,6 +2,8 @@
 
 Alles, was ein Werkzeug ausgibt (print) oder protokolliert, wird während der Ausführung in Echtzeit in der Ausgabekonsole unter dem Formular angezeigt. Die Protokollierungsstufen sind farblich gekennzeichnet, und reguläre ``print``-Ausgaben werden in einer eigenen Farbe dargestellt, um sie von Logmeldungen unterscheidbar zu machen.
 
+Wenn die Anwendung es einschaltet, wird der Rückgabewert eines erfolgreichen Laufs am Ende der Ausgabe gedruckt: eine Leerzeile, eine Linie ``========== Ergebnis ==========``, dann der Wert. Bei einem fehlgeschlagenen oder abgebrochenen Lauf und bei einem Lauf ohne Rückgabewert wird nichts gedruckt.
+
 * ``Kopieren`` (``Copy``): Kopiert den gesamten Inhalt der Konsole in die Zwischenablage.
 * ``Protokoll anzeigen`` (``View Log``): Öffnet die Ausgabe des aktuellen Laufs in einem separaten, in der Größe anpassbaren Fenster.
 

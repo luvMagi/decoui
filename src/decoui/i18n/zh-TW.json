@@ -29,6 +29,11 @@
   "tool.replay": "重用參數",
   "tool.output": "輸出",
   "tool.copy": "複製",
+  "tool.copy_result": "複製回傳值",
+  "tool.send_result": "傳送回傳值",
+  "tool.result_none": "這次執行沒有回傳值。",
+  "tool.result_banner": "結果",
+  "tool.send_result_tooltip": "把這個回傳值送進另一個工具的輸入欄",
   "tool.view_log": "檢視記錄",
   "tool.running": "執行中…",
   "tool.done": "完成 ({elapsed}s)",
@@ -123,6 +128,9 @@
 
   "tool_i18n.problem_source": "翻譯",
   "tool_i18n.problem_summary": "無法讀取工具翻譯檔案；將使用未翻譯文字",
+  "field_routing.problem_source": "欄位傳遞",
+  "field_routing.problem_summary": "有工具產出欄位 {field_id}，但沒有任何參數接收它",
+
   "theme.problem_source": "佈景主題",
   "theme.problem_summary": "佈景主題載入失敗；已回退至淺色主題"
 }

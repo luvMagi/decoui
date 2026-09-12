@@ -138,6 +138,7 @@ def merge(self, files: list, output: str = "out.txt") -> str:
 | `defaults` | `dict\|callable\|str` | `None` | Initial form values, evaluated when the page opens. |
 | `completion_debounce_ms` | `int` | `250` | Idle time before a dynamic completions callback runs. |
 | `on_cancel` | `callable\|str` | `None` | Cleanup to run when the tool is cancelled. See [Cancellation](#cancellation). |
+| `print_result` | `bool\|None` | `None` | Whether this tool prints its return value to the console. `None` follows `gui_main(print_result=)`. See [Printing the return value](#printing-the-return-value). |
 
 Every key in `placeholders`, `labels`, `completions`, `cascade` and `defaults` must name a real parameter of the method, and `placeholders`/`labels` values must be strings. A mistake raises at startup, when the toolset tree is built, naming the tool and listing the parameters it does have.
 
@@ -156,6 +157,8 @@ gui_main(title="My App", db_path="~/.myapp/history.db", on_startup=connect_backe
 | `theme` | `str\|None` | `None` | Default theme id. A theme the user picked in Settings wins over it. See [Themes](#themes). |
 | `theme_dir` | `str\|Path\|None` | `~/.decoui/themes` | Directory scanned for user-supplied theme files. |
 | `language` | `str\|None` | `None` | Code for the language decoui's **own** interface is drawn in — Run, Stop, the history columns. A language the user picked in Settings wins over it. A tool's own label, description and docstring are never translated. Defaults to English. |
+| `order` | `str` | `"declaration"` | How the sidebar is ordered. `"declaration"` keeps the order the source reads in; `"label"` sorts toolsets and tools alphabetically. See [Sidebar order](#sidebar-order). |
+| `print_result` | `bool` | `False` | Print every successful run's return value to its console. Unlike `theme` and `language`, there is no Settings entry overriding it. See [Printing the return value](#printing-the-return-value). |
 
 By default `gui_main()` scans the caller's namespace, so a toolset has to be imported *and* look used:
 
@@ -173,7 +176,55 @@ from mytools.restore import RestoreTools
 gui_main(title="My App", toolsets=[RestoreTools])
 ```
 
-The list controls *what* loads, not the order it appears in: the sidebar is always sorted by label.
+The list controls what loads *and* the order it appears in — see below.
+
+### Sidebar order
+
+By default the sidebar reads the way the source does. Toolsets appear in the order
+`toolsets=[...]` lists them (or, under discovery, the order they were imported
+into the calling namespace), and each toolset's tools appear in the order their
+`def` statements were written:
+
+```python
+@toolset(label="Deploy")
+class DeployTools:
+
+    @tool(label="Build")      # first in the class body, first in the sidebar
+    def build(self): ...
+
+    @tool(label="Analyse")    # second here, second there
+    def analyse(self): ...
+```
+
+That order is something you control and can reorder by moving a method. The
+alternative sorts everything by label, case-insensitively:
+
+```python
+gui_main(title="My App", toolsets=[RestoreTools, DeployTools], order="label")
+```
+
+| `order` | Sidebar |
+|---|---|
+| `"declaration"` (default) | Toolsets as listed, tools as written in the class body. |
+| `"label"` | Toolsets and tools sorted by label, case-insensitively. |
+
+Ask for `"label"` when the labels are a flat list people look things up in.
+Keep the default when the tools form a sequence — a build that comes before a
+deploy reads wrong under any alphabet.
+
+Two things do not follow `order`:
+
+- **The history page's tool filter** stays alphabetical. It is a lookup control,
+  not a map of the application.
+- **Startup order.** Toolsets are constructed in sidebar order, but that is an
+  implementation detail and not something to depend on — see
+  [startup-lifecycle.md](startup-lifecycle.md).
+
+Inherited tools come before the ones a subclass adds. A tool a subclass
+overrides keeps the position its base class gave it.
+
+> **Changed in 1.1.0.** Up to 1.0.0 the sidebar was always sorted by label.
+> Pass `order="label"` to keep that.
 
 ### Startup
 
@@ -260,6 +311,9 @@ The one exception is step 4: a class whose `__init__` raises produces no object,
 | `pathlib.Path` | `QLineEdit` + buttons | Text field with **File...** (file picker) and **Folder...** (directory picker) buttons. The selected path is passed as a `pathlib.Path` to the method. |
 
 - Required parameters (no default) are marked with a red `*` in the form label.
+- **No field accepts rich text.** Pasting a coloured line copied out of the
+  output console drops the colour and keeps the text, so the paste is never left
+  invisible against the form's background. (Fixed in 1.1.0.)
 - `Optional[X]` is unwrapped to `X`.
 - `Annotated[X, ...]` maps on `X`; the metadata does not affect widget choice.
 - Default values are pre-filled into widgets automatically.
@@ -403,7 +457,37 @@ Tool methods can use `print()` and the standard `logging` module. Both are captu
 | `logging.ERROR` | Red |
 | `logging.CRITICAL` | Bold Red |
 
-Return values from tool methods are **not** displayed in the GUI. Use `logging` or `print` for any output you want users to see.
+A return value is never rendered into the page as the tool works. Anything the user has to see *while* it runs goes through `print()`, `logging` or [`progress()`](#progress). What happens to the value once the run ends is below.
+
+### Printing the return value
+
+Off by default: a finished run records its return value in the history and offers it to **Copy Result** and **Send Result**, but the console says nothing about it. Turn it on and decoui appends the value to the console instead of every tool ending with `print(result)`:
+
+```python
+gui_main(title="Ops", toolsets=[BuildTools], print_result=True)
+```
+
+```
+building index...
+done in 3.2s
+
+========== Result ==========
+{"rows": 1284, "path": "out/index.db"}
+```
+
+The rule is drawn only when there is something under it. A run that failed, a run that was cancelled, and a run that returned `None` all print nothing at all — not even the banner, which would claim a value exists.
+
+One tool can disagree with the application:
+
+```python
+@tool(label="Open Session", print_result=False)   # returns an internal handle
+def open_session(self) -> Session:
+    ...
+```
+
+`print_result` on `@tool` has three states, and `None` — what you get by not writing it — is not "off": it means "whatever the application said". `True` and `False` override `gui_main` for that tool alone.
+
+The printed lines are ordinary stdout lines. They are stored with the run, come back when the log is reopened from the history, and are matched by the log window's filter and search, exactly as the tool's own `print()` output is — and are indistinguishable from it. The text is the same rendering the history record and Copy Result use, so one run cannot read two ways depending on where you look at it.
 
 ### `run_process` — calling an external program
 
@@ -452,6 +536,8 @@ Outside a running tool — when you instantiate the toolset and call the method 
 | **Reset** | Expand the parameter panel and clear the output console. Parameters are kept. |
 | **Stop** | Request cancellation of the running task. |
 | **Replay** | Open the History panel pre-filtered to this tool's past runs. |
+| **Copy Result** | Copy the last run's return value to the clipboard. Disabled until a run returns something. |
+| **Send Result** | Hand the last run's return value to another tool's field, matched by `F(id=...)`. Built only when some field declares the same id. |
 | **Copy** | Copy current console output to clipboard. |
 | **View Log** | Open the current console output in a resizable log viewer window. |
 

@@ -2,6 +2,8 @@
 
 Tudo o que uma ferramenta imprime (print) ou registra em log aparece no console de saída abaixo do formulário, em tempo real, enquanto ela está em execução. Os níveis de log são codificados por cores, e a saída comum do ``print`` é exibida com uma cor própria para permanecer distinguível do log.
 
+Se a aplicação ativar isso, o valor de retorno de uma execução bem-sucedida é impresso no fim da saída: uma linha em branco, uma régua ``========== Resultado ==========`` e então o valor. Nada é impresso quando uma execução falha, é cancelada ou não retorna nada.
+
 * ``Copiar`` (``Copy``): copia todo o conteúdo do console para a área de transferência.
 * ``Ver Log`` (``View Log``): abre a saída da execução em uma janela separada e redimensionável.
 

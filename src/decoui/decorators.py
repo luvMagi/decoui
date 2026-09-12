@@ -111,6 +111,7 @@ def tool(
     defaults: Any = None,
     completion_debounce_ms: int = DEFAULT_DEBOUNCE_MS,
     on_cancel: Any = None,
+    print_result: bool | None = None,
 ) -> Callable[[_Fn], _Fn]:
     """Method decorator that marks a method as a runnable tool.
 
@@ -181,6 +182,14 @@ def tool(
             it blocks the GUI -- and tolerate state that does not exist yet,
             since Stop may be pressed before the tool assigns it:
             ``proc = getattr(self, "_proc", None)``.
+        print_result: Whether a successful run prints its return value to this
+            tool's console, under a ``========== Result ==========`` rule.
+
+            Three states, and None is not "off": None follows whatever the
+            application passed to ``gui_main(print_result=...)``, True and False
+            override it for this tool alone. Leave it unwritten unless this one
+            tool disagrees with the application -- a tool whose return value is
+            an internal handle, say, in an application that prints the rest.
 
     Returns:
         The original function, tagged with decoui tool metadata.
@@ -214,9 +223,11 @@ def tool(
         checked at import time, so a direct call is never blocked by a typo in
         form text.
 
-        The return value is **not** shown in the GUI. It is serialised into the
-        run's history record, nothing more. Anything the user must see goes
-        through ``print()``, ``logging`` or :func:`decoui.progress`.
+        The return value is never *rendered into the page*. It is serialised
+        into the run's history record, offered to Copy Result and Send Result,
+        and -- when ``print_result`` is on -- written to the console as one more
+        line. Anything the user must see as the tool works goes through
+        ``print()``, ``logging`` or :func:`decoui.progress`.
     """
     def decorator(fn: _Fn) -> _Fn:
         """Attach the tool metadata and return the function untouched.
@@ -243,6 +254,7 @@ def tool(
             "defaults": defaults,
             "completion_debounce_ms": completion_debounce_ms,
             "on_cancel": on_cancel,
+            "print_result": print_result,
         })
         return fn
     return decorator

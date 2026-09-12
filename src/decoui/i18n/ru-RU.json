@@ -29,6 +29,11 @@
   "tool.replay": "Повторить",
   "tool.output": "Вывод",
   "tool.copy": "Копировать",
+  "tool.copy_result": "Копировать результат",
+  "tool.send_result": "Отправить результат",
+  "tool.result_none": "Этот запуск ничего не вернул.",
+  "tool.result_banner": "Результат",
+  "tool.send_result_tooltip": "Отправить этот результат в поле другого инструмента",
   "tool.view_log": "Просмотр журнала",
   "tool.running": "Выполняется…",
   "tool.done": "Готово ({elapsed}s)",
@@ -123,6 +128,9 @@
 
   "tool_i18n.problem_source": "Переводы",
   "tool_i18n.problem_summary": "Не удалось прочитать файл перевода инструмента; используется непереведённый текст",
+  "field_routing.problem_source": "Передача полей",
+  "field_routing.problem_summary": "инструмент создаёт поле {field_id}, но его никто не принимает",
+
   "theme.problem_source": "Темы",
   "theme.problem_summary": "Не удалось загрузить тему; применен переход на светлую тему"
 }

@@ -29,6 +29,11 @@
   "tool.replay": "Yeniden Oynat",
   "tool.output": "Çıktı",
   "tool.copy": "Kopyala",
+  "tool.copy_result": "Sonucu kopyala",
+  "tool.send_result": "Sonucu gönder",
+  "tool.result_none": "Bu çalıştırma bir şey döndürmedi.",
+  "tool.result_banner": "Sonuç",
+  "tool.send_result_tooltip": "Bu sonucu başka bir aracın alanına gönder",
   "tool.view_log": "Günlüğü Görüntüle",
   "tool.running": "Çalışıyor…",
   "tool.done": "Tamamlandı ({elapsed}s)",
@@ -123,6 +128,9 @@
 
   "tool_i18n.problem_source": "Çeviriler",
   "tool_i18n.problem_summary": "Bir araç çeviri dosyası okunamadı; çevrilmemiş metin kullanılıyor",
+  "field_routing.problem_source": "Alan yönlendirme",
+  "field_routing.problem_summary": "bir araç {field_id} alanını üretiyor ancak onu kabul eden yok",
+
   "theme.problem_source": "Temalar",
   "theme.problem_summary": "Tema yüklenemedi; açık renk temaya geri dönülüyor"
 }

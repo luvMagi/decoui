@@ -2,6 +2,8 @@
 
 Bir aracın yazdırdığı (print) veya günlüğe kaydettiği her şey, araç çalışırken formun altındaki çıktı konsolunda gerçek zamanlı olarak görüntülenir. Günlük seviyeleri renkle kodlanmıştır ve standart ``print`` çıktısı, günlük mesajlarından ayırt edilebilmesi için kendi renginde gösterilir.
 
+Uygulama bunu açtıysa, başarılı bir çalıştırmanın dönüş değeri çıktının sonunda yazdırılır: bir boş satır, ``========== Sonuç ==========`` çizgisi ve ardından değerin kendisi. Başarısız olan, iptal edilen ya da hiçbir şey döndürmeyen çalıştırmalarda hiçbir şey yazdırılmaz.
+
 * ``Kopyala`` (``Copy``): Konsolun tüm içeriğini panoya kopyalar.
 * ``Günlüğü Görüntüle`` (``View Log``): Bu çalıştırmanın çıktısını ayrı, boyutu ayarlanabilir bir pencerede açar.
 

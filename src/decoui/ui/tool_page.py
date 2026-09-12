@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
@@ -35,7 +36,7 @@ from ..assist import (
     read_form,
     resolve_defaults,
 )
-from ..engine.executor import ExecutionEngine
+from ..engine.executor import ExecutionEngine, render_result
 from ..registry import ToolInfo
 from ..i18n import t
 from ..theme import active_theme, apply_label_case
@@ -56,6 +57,17 @@ from .log_window import (
     level_inks,
     timestamp_color,
 )
+
+#: How much of a rendered return value the result buttons show in their
+#: tooltip. Generous next to history's 60-character column preview, because a
+#: tooltip has the room and this is the only place the value is legible at all.
+_RESULT_PREVIEW_CHARS = 200
+
+#: Half the rule drawn around the word on the console's result banner, written
+#: on both sides of it. A fixed length rather than padding to a total width:
+#: the translated word is not as long as "Result", and stretching the rule to
+#: hide that would make the banner a different shape in every language.
+_RESULT_RULE = "=" * 10
 
 #: Status badge -> the theme colour token that inks it.
 _STATUS_INK = {
@@ -130,16 +142,33 @@ class ToolPage(QWidget):
     Replay                           the run history for this tool
     ==============================  =========================================
 
-    The tool's return value is deliberately not shown anywhere on this page.
+    The tool's return value is never drawn into the page's own furniture -- it
+    is made actionable instead. Copy Result puts it on the clipboard and Send
+    Result hands it to another tool's field; both carry a preview in their
+    tooltip, because a button for something invisible is worth explaining.
+    Under ``print_result`` it also reaches the console, but as one more line of
+    output rather than as a widget of its own.
 
     Attributes:
         history_requested: Emitted with the tool id when Replay is pressed, so
             the main window can open the History page filtered to this tool.
+        send_requested: ``(target_tool_id, param_name, value)`` when Send Result
+            is used. The page does not know how to reach another page, so the
+            main window does the routing -- the same division as Replay.
     """
 
     history_requested = Signal(str)   # emits tool_id
+    send_requested = Signal(str, str, object)   # (tool_id, param_name, value)
 
-    def __init__(self, tool_info: ToolInfo, instance, parent=None, assist_runner=None):
+    def __init__(
+        self,
+        tool_info: ToolInfo,
+        instance,
+        parent=None,
+        assist_runner=None,
+        send_targets: list[tuple[str, str, str]] | None = None,
+        app_print_result: bool = False,
+    ):
         """Build the page for one tool and wire it to its own execution engine.
 
         Args:
@@ -149,6 +178,13 @@ class ToolPage(QWidget):
             parent: Qt parent widget.
             assist_runner: Strategy used to run completion callbacks. Defaults
                 to the standard runner; tests substitute a synchronous one.
+            send_targets: Where this tool's return value may be sent, as
+                ``(target_tool_id, "ToolSet: Tool", param_name)``. Worked out by
+                the main window from the registry's field index. Empty or None
+                means no Send Result button is built at all -- a disabled one
+                would promise a destination that does not exist.
+            app_print_result: The application's ``gui_main(print_result=...)``.
+                Used only where this tool declares nothing of its own.
 
         Note:
             Each page owns a private ExecutionEngine, so pages run
@@ -163,6 +199,20 @@ class ToolPage(QWidget):
         self._widgets: dict[str, QWidget] = {}
         self._log_records: list[LogEntry] = []
         self._open_log_windows: list = []
+        self._send_targets = list(send_targets or ())
+        # The live object, not its rendering: Send hands the real value to a
+        # field declared for the same type, which is the whole reason the two
+        # ends are matched by type rather than by name. Holding it costs the
+        # memory of whatever the tool returned, so it is dropped the moment the
+        # next run starts -- see _on_run.
+        self._result: Any = None
+        # Resolved once, here: the tool's own answer wins, and None means it
+        # gave none -- which is why this is not `tool_info.print_result or ...`.
+        self._print_result = (
+            tool_info.print_result
+            if tool_info.print_result is not None
+            else app_print_result
+        )
         # The badge stops on whatever the last run ended as, and its colours are
         # written into it at that moment. Kept so a re-theme can re-ink the badge
         # that is on screen instead of leaving the old theme's fill there.
@@ -290,12 +340,33 @@ class ToolPage(QWidget):
         self._replay_btn.clicked.connect(
             lambda: self.history_requested.emit(self._tool.tool_id)
         )
+        # Everything to the right of the stretch is "what to do now the run is
+        # over"; everything left of it acts on the run itself. Copy and Send
+        # belong on that side with Replay, and they belong in this row rather
+        # than under the console: the row is always on screen, while a long log
+        # would push anything below it out of view exactly when it is wanted.
+        self._copy_result_btn = QPushButton(t("tool.copy_result"), self)
+        self._copy_result_btn.clicked.connect(self._copy_result)
+
+        self._send_result_btn: QPushButton | None = None
+        if self._send_targets:
+            self._send_result_btn = QPushButton(t("tool.send_result"), self)
+            if len(self._send_targets) == 1:
+                self._send_result_btn.clicked.connect(self._send_result_to_only)
+            else:
+                self._send_result_btn.setMenu(self._build_send_menu())
+
         btn_row.addWidget(self._run_btn)
         btn_row.addWidget(self._reset_btn)
         btn_row.addWidget(self._stop_btn)
         btn_row.addStretch()
+        btn_row.addWidget(self._copy_result_btn)
+        if self._send_result_btn is not None:
+            btn_row.addWidget(self._send_result_btn)
         btn_row.addWidget(self._replay_btn)
         root.addLayout(btn_row)
+
+        self._refresh_result_buttons()
 
         # ── Output section header ─────────────────────────────────────────────
         out_hdr = QHBoxLayout()
@@ -544,6 +615,11 @@ class ToolPage(QWidget):
 
         self._console.clear()
         self._log_records.clear()
+        # Dropped here rather than when the next run ends: a tool that returned
+        # something large would otherwise stay held for the whole of the next
+        # run as well, for no benefit -- the buttons are already disabled.
+        self._result = None
+        self._refresh_result_buttons()
 
         if errors:
             for tb in errors:
@@ -579,15 +655,21 @@ class ToolPage(QWidget):
         if message:
             self._status_label.setText(message)
 
-    def _on_finished(self, _result: Any, status: str):
+    def _on_finished(self, result: Any, status: str):
         """Restore the idle state and show how the run ended.
 
         Args:
-            _result: The tool's return value. Deliberately unused -- decoui
-                does not render return values; the engine has already recorded
-                it in the run history.
+            result: The tool's return value. Held -- as the object, not as
+                text -- so Copy Result and Send Result have something to act
+                on. Still not drawn anywhere on the page.
             status: ``'success'``, ``'error'`` or ``'cancelled'``.
         """
+        # Only a successful run has a return value. An error's is None because
+        # the tool never reached its return statement, and a cancelled one's is
+        # None because the exception was injected before it did.
+        self._result = result if status == "success" else None
+        self._refresh_result_buttons()
+
         elapsed = time.monotonic() - self._start_time
         self._progress.setVisible(False)
         # Back to indeterminate, so the next run does not start from the last
@@ -600,10 +682,35 @@ class ToolPage(QWidget):
 
         if status == "success":
             self._set_status("success", t("tool.done", elapsed=f"{elapsed:.1f}"))
+            self._print_result_lines()
         elif status == "error":
             self._set_status("error", t("tool.error", elapsed=f"{elapsed:.1f}"))
         else:
             self._set_status("cancelled", t("tool.cancelled"))
+
+    def _print_result_lines(self) -> None:
+        """Write the finished run's return value to the console, if asked to.
+
+        Three lines rather than one: a blank one so the value does not read as
+        the continuation of whatever the tool last printed, the banner that
+        names what follows, and the value itself. They are appended as ordinary
+        stdout lines, which is what makes them stored with the run, re-openable
+        from history, and reachable by the log window's filter and search.
+
+        The text is :func:`render_result`'s, the same renderer the history
+        record and Copy Result use, so one run cannot read two ways.
+        """
+        if not self._print_result:
+            return
+        text = render_result(self._result)
+        # None is "the tool returned nothing" -- printing the word None would
+        # be decoui inventing output the run did not have.
+        if text is None:
+            return
+        rule = _RESULT_RULE
+        self._append_log("stdout", "")
+        self._append_log("stdout", f"{rule} {t('tool.result_banner')} {rule}")
+        self._append_log("stdout", text)
 
     def _set_status(self, status: str, text: str) -> None:
         """Show one run state on the badge, and record which one it is.
@@ -639,6 +746,66 @@ class ToolPage(QWidget):
         self._console.setTextCursor(cursor)
         self._console.ensureCursorVisible()
 
+    # ── The return value ──────────────────────────────────────────────────────
+
+    def _build_send_menu(self) -> QMenu:
+        """Build the destination menu for a value with more than one target.
+
+        Returns:
+            A menu with one entry per destination, reading
+            ``ToolSet: Tool → field``. Entries follow the registry's order, so
+            the menu reads in the same order as the sidebar.
+        """
+        menu = QMenu(self)
+        for tool_id, display, param_name in self._send_targets:
+            action = menu.addAction(f"{display} → {param_name}")
+            action.triggered.connect(
+                lambda _checked=False, tid=tool_id, pname=param_name:
+                self.send_requested.emit(tid, pname, self._result)
+            )
+        return menu
+
+    def _send_result_to_only(self) -> None:
+        """Send the result to the single destination it has.
+
+        A one-entry menu would be a click and a decision for something with no
+        alternative, so the button acts directly instead.
+        """
+        tool_id, _display, param_name = self._send_targets[0]
+        self.send_requested.emit(tool_id, param_name, self._result)
+
+    def _copy_result(self) -> None:
+        """Put the run's return value on the clipboard.
+
+        Uses the same rendering the history record stores, so a value copied
+        from here and the same value read back out of history are the same text.
+        """
+        text = render_result(self._result)
+        if text is not None:
+            QApplication.clipboard().setText(text)
+
+    def _refresh_result_buttons(self) -> None:
+        """Enable, disable and re-label the two result buttons.
+
+        Called after every run and whenever the held value is dropped. The
+        tooltip is where the preview lives: the value is not drawn on the page,
+        so without it the buttons would be two controls for something the user
+        cannot see at all.
+        """
+        text = render_result(self._result)
+        if text is None:
+            tooltip = t("tool.result_none")
+        else:
+            tooltip = text if len(text) <= _RESULT_PREVIEW_CHARS else (
+                text[:_RESULT_PREVIEW_CHARS] + "…"
+            )
+
+        for button in (self._copy_result_btn, self._send_result_btn):
+            if button is None:
+                continue
+            button.setEnabled(text is not None)
+            button.setToolTip(tooltip)
+
     def _copy_console(self):
         """Copy the whole console to the clipboard."""
         QApplication.clipboard().setText(self._console.toPlainText())
@@ -667,6 +834,39 @@ class ToolPage(QWidget):
         """
         self._param_panel.setEnabled(not readonly)
         self._set_assist_suspended(readonly)
+
+    def set_param(self, name: str, value: Any) -> None:
+        """Write one field, as if the user had just filled it in.
+
+        Used by Send Result. Deliberately different from :meth:`restore_params`
+        in one respect: the cascade is **told**, rather than suspended. That
+        method restores a whole set at once, where a cascade would overwrite the
+        very values being replayed; this one writes a single field, and a
+        cascade firing from it is the point -- setting an artifact id should
+        still bring its version along, exactly as typing the id would.
+
+        The notification has to be explicit. ``set_value`` writes through
+        ``setText`` and friends, which emit no commit signal, so leaving the
+        cascade merely un-suspended would have left it silent.
+
+        Args:
+            name: Parameter name. An unknown one is ignored, so a tool whose
+                signature changed cannot break the sender.
+            value: The value to write. Coerced by the widget; one it refuses is
+                skipped rather than raised, matching replay's tolerance.
+        """
+        widget = self._widgets.get(name)
+        if widget is None:
+            return
+        try:
+            set_value(widget, value)
+        except Exception:
+            # Same policy as restore_params: a value that will not fit is not
+            # worth failing a transfer the user asked for, and the field simply
+            # keeps what it had.
+            return
+        if self._cascade is not None:
+            self._cascade.notify_commit(name)
 
     def restore_params(self, param_map: dict[str, Any]):
         """Refill the form from a past run, for Replay.

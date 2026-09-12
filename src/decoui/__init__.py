@@ -58,7 +58,7 @@ Where to read further
 
 ============================  ==============================================
 :mod:`decoui.decorators`      every ``@tool`` / ``@toolset`` argument
-:mod:`decoui.types`           ``F`` field metadata and the marker types
+:mod:`decoui.types`           ``F`` field metadata, including field identity
 :mod:`decoui.widget_builder`  annotation -> widget mapping, value conversion
 :mod:`decoui.registry`        how annotations are resolved and validated
 :mod:`decoui.runner`          ``gui_main`` and the startup order
@@ -75,7 +75,7 @@ from .engine.worker import progress
 from .process import ProcessError, ProcessResult, run_process
 from .runner import gui_main
 from .storage.store import Store, store
-from .types import Choice, DirPath, F, FilePath, Text
+from .types import F
 
 __all__ = [
     "toolset",
@@ -88,10 +88,6 @@ __all__ = [
     "store",
     "Store",
     "F",
-    "Text",
-    "FilePath",
-    "DirPath",
-    "Choice",
 ]
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"

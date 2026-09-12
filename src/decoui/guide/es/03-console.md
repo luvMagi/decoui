@@ -2,6 +2,8 @@
 
 Todo lo que una herramienta imprime (print) o registra en el log aparece en la consola de salida situada debajo del formulario, en tiempo real, mientras se ejecuta. Los niveles de registro están codificados por colores, y la salida normal de ``print`` se muestra con un color propio para distinguirla fácilmente de los mensajes de registro.
 
+Si la aplicación lo activa, el valor de retorno de una ejecución correcta se imprime al final de la salida: una línea en blanco, una regla ``========== Resultado ==========`` y luego el valor. No se imprime nada cuando una ejecución falla, se cancela o no devuelve nada.
+
 * ``Copiar`` (``Copy``): copia todo el contenido de la consola al portapapeles.
 * ``Ver registro`` (``View Log``): abre la salida de la ejecución en una ventana independiente y de tamaño ajustable.
 

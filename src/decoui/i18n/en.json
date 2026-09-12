@@ -29,6 +29,11 @@
   "tool.replay": "Replay",
   "tool.output": "Output",
   "tool.copy": "Copy",
+  "tool.copy_result": "Copy Result",
+  "tool.send_result": "Send Result",
+  "tool.result_none": "This run returned nothing.",
+  "tool.result_banner": "Result",
+  "tool.send_result_tooltip": "Send this result into another tool's field",
   "tool.view_log": "View Log",
   "tool.running": "Running…",
   "tool.done": "Done ({elapsed}s)",
@@ -123,6 +128,9 @@
 
   "tool_i18n.problem_source": "Translations",
   "tool_i18n.problem_summary": "a tool translation file could not be read; the untranslated text is used",
+  "field_routing.problem_source": "Field routing",
+  "field_routing.problem_summary": "a tool produces field {field_id}, but nothing accepts it",
+
   "theme.problem_source": "Themes",
   "theme.problem_summary": "theme loading failed; falling back to the light theme"
 }

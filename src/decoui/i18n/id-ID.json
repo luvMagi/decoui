@@ -29,6 +29,11 @@
   "tool.replay": "Putar Ulang",
   "tool.output": "Keluaran",
   "tool.copy": "Salin",
+  "tool.copy_result": "Salin hasil",
+  "tool.send_result": "Kirim hasil",
+  "tool.result_none": "Eksekusi ini tidak mengembalikan apa pun.",
+  "tool.result_banner": "Hasil",
+  "tool.send_result_tooltip": "Kirim hasil ini ke bidang alat lain",
   "tool.view_log": "Lihat Log",
   "tool.running": "Sedang berjalan…",
   "tool.done": "Selesai ({elapsed}s)",
@@ -123,6 +128,9 @@
 
   "tool_i18n.problem_source": "Terjemahan",
   "tool_i18n.problem_summary": "Berkas terjemahan alat tidak dapat dibaca; teks yang belum diterjemahkan digunakan",
+  "field_routing.problem_source": "Perutean bidang",
+  "field_routing.problem_summary": "sebuah alat menghasilkan bidang {field_id}, tetapi tidak ada yang menerimanya",
+
   "theme.problem_source": "Tema",
   "theme.problem_summary": "Gagal memuat tema; kembali menggunakan tema terang"
 }

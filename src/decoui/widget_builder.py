@@ -21,9 +21,9 @@ Rules that decide what a tool actually receives
 
 * **Anything unrecognised becomes a QLineEdit and is passed through as a str.**
   There is no error and no warning. A parameter annotated ``datetime``,
-  ``set[str]``, a dataclass, or one of the marker types in :mod:`decoui.types`
-  reaches the method as whatever the user typed. Annotate parameters with the
-  types in the table above and convert inside the method if you need more.
+  ``set[str]``, a dataclass or any ``str`` subclass reaches the method as
+  whatever the user typed. Annotate parameters with the types in the table
+  above and convert inside the method if you need more.
 
 * **Only single-Optional unions are unwrapped.** ``Optional[Path]`` and
   ``Path | None`` build the path widget; ``int | str`` has two non-None members,
@@ -44,6 +44,14 @@ Rules that decide what a tool actually receives
 
 * **An Enum parameter receives the member**, not its name: the combo box stores
   the member as item data and hands it back untouched.
+
+* **No field accepts rich text.** Every text widget here reads back with
+  ``toPlainText()`` / ``text()``, so formatting was never part of a value -- but
+  a QTextEdit that accepts it still *paints* it. Pasting a line copied out of
+  the output console, which carries its level colour as HTML, drew that line in
+  the console's colour on the form's background; white-on-white made it
+  invisible. The multi-line fields therefore refuse rich text outright, which is
+  a paste behaviour rather than anything a theme could fix.
 
 * Conversion failures never abort a run before it starts in silence: they are
   collected by :func:`coerce_params`, printed to the console as ERROR entries,
@@ -74,14 +82,39 @@ from PySide6.QtWidgets import (
 from .i18n import t
 
 
-# ── Marker subclass to distinguish dict QTextEdit from list QTextEdit ─────────
-#
-# dict and list both render as a QTextEdit, but their values are read back in
-# completely different ways (JSON object vs. split-and-strip list). get_value()
-# has only the widget to go on, so the dict case needs its own class.
+# ── The two multi-line fields ─────────────────────────────────────────────────
 
-class _DictTextEdit(QTextEdit):
-    """QTextEdit that reads back as a dict rather than a list of lines."""
+class _PlainTextEdit(QTextEdit):
+    """QTextEdit that takes plain text from the clipboard and nothing else.
+
+    A form field stores text, never formatting: the value is read back with
+    ``toPlainText()``, so a pasted colour changed nothing about what the tool
+    ran with. It changed what the user could see. Output-console lines are
+    coloured per level and go to the clipboard as HTML too, so pasting one back
+    into a field -- to re-run with an id the log just printed -- reproduced the
+    console's ink on the form's background, and a light theme met a white line
+    with a white field.
+
+    ``setAcceptRichText(False)`` covers drops as well as pastes: both arrive
+    through ``insertFromMimeData``.
+    """
+
+    def __init__(self, parent=None):
+        """Build the field with rich text refused.
+
+        Args:
+            parent: Qt parent widget.
+        """
+        super().__init__(parent)
+        self.setAcceptRichText(False)
+
+
+# dict and list both render as a plain text field, but their values are read
+# back in completely different ways (JSON object vs. split-and-strip list).
+# get_value() has only the widget to go on, so the dict case needs its own class.
+
+class _DictTextEdit(_PlainTextEdit):
+    """Plain-text field that reads back as a dict rather than a list of lines."""
 
 
 #: Floor for the two path-picker buttons. A minimum rather than a fixed width:
@@ -430,8 +463,8 @@ def _build_for_type(ann, default, parent) -> QWidget:
     Returns:
         The widget for this type, pre-filled with the default when there is one.
         Falls back to a QLineEdit for every type not listed below -- including
-        every ``str`` subclass, which is why the marker types in
-        :mod:`decoui.types` do not select widgets.
+        every ``str`` subclass, which is why subclassing ``str`` has never been
+        a way to ask for a different widget.
     """
     import json
 
@@ -488,10 +521,10 @@ def _build_for_type(ann, default, parent) -> QWidget:
                 w.setCurrentIndex(idx)
         return w
 
-    # list / list[X] → QTextEdit
+    # list / list[X] → _PlainTextEdit
     origin = get_origin(ann)
     if ann is list or origin is list:
-        w = QTextEdit(parent)
+        w = _PlainTextEdit(parent)
         w.setMinimumHeight(80)
         w.setMaximumHeight(160)
         if default is not inspect.Parameter.empty and isinstance(default, list):

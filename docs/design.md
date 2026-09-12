@@ -168,14 +168,30 @@ Only native Python types are supported. No custom marker types.
 | `int` | `QSpinBox` (no arrows) | Full int range; user types or uses keyboard. |
 | `float` | `QDoubleSpinBox` (no arrows) | 4 decimal places. |
 | `bool` | `QCheckBox` | Checked / unchecked. |
-| `list` / `list[X]` | `QTextEdit` | Items split by newline or comma. |
-| `dict` | `_DictTextEdit` (QTextEdit subclass) | JSON input. Parsed with `json.loads`, then `ast.literal_eval` fallback. Raises on failure. |
+| `list` / `list[X]` | `_PlainTextEdit` (QTextEdit subclass) | Items split by newline or comma. |
+| `dict` | `_DictTextEdit` (`_PlainTextEdit` subclass) | JSON input. Parsed with `json.loads`, then `ast.literal_eval` fallback. Raises on failure. |
 | `Enum` subclass | `QComboBox` | Dropdown; `currentData()` returns the Enum member directly. |
 | `Optional[X]` | Widget for `X` | Unwrapped silently. |
 
 ### Label convention
 
 Parameters without a default value are marked with a red `*` prefix in the form label, indicating they are required.
+
+### No field accepts rich text
+
+`_PlainTextEdit` exists for one reason: `setAcceptRichText(False)`. A field's
+value is read back with `toPlainText()`, so formatting was never part of it —
+but a QTextEdit that accepts rich text still *paints* it. Console lines are
+coloured per level (§6.5) and a selection copied out of the console carries
+`text/html` as well as `text/plain`, so pasting one back into a field to re-run
+with an id the log just printed reproduced the console's ink on the form's
+background: `print`'s white `#FFFFFF` landed on a white field and vanished.
+
+Refusing rich text is the right layer for the fix. The alternative — teaching
+the console to copy plain text only — takes formatting away from every other
+paste target, and a theme cannot fix it at all: no choice of field background
+is right for six console colours at once. `insertFromMimeData()` handles drops
+as well as pastes, so one flag covers both.
 
 ### Default values
 
@@ -240,6 +256,13 @@ When annotations cannot be resolved (an alias only imported under `TYPE_CHECKING
 ### 5.2 Sidebar (NavTree)
 
 - Two-layer tree: **ToolSet (bold)** → Tool (half of the platform-default indentation).
+- **Order comes from the registry, not from here.** `gui_main(order=…)` decides
+  it once, for both levels: declaration order by default — toolsets as listed,
+  tools as their `def` statements were written — or by label under
+  `order="label"`, which is what decoui did unconditionally up to v1.0.0. The
+  default changed because a class body is something its author can reorder and
+  an alphabet is not: a Build that has to precede a Deploy reads wrong under any
+  alphabet, and renaming one tool used to scatter a group.
 - Search box filters tool labels in real time (hides tools that don't match, removes toolsets with zero visible tools).
 - Tag filter hides the **entire toolset** if its tags don't include all active tags.
 - Toolset description shown as a tooltip on hover.
@@ -296,6 +319,8 @@ menu bar.
 | **Reset** | Clear console + log records; expand params panel. Does not change param values. |
 | **Stop** | Request cancellation. |
 | **Replay** | Emit `history_requested(tool_id)` → MainWindow shows History filtered to this tool. |
+| **Copy Result** | Put `render_result()` of the last run's value on the clipboard. Disabled until a run returns something. |
+| **Send Result** | Emit `send_requested(tool_id, param, value)` → MainWindow routes the live object into a field declaring the same `F(id=...)`. Not built at all when no field does. |
 | **Copy** | Copy console text to clipboard. |
 | **View Log** | Open current log records in a `LogWindow` (same as History's View Full Log). |
 
@@ -424,6 +449,24 @@ write it to `execution_log`.
 | `logging.WARNING` | Yellow `#FFD700` |
 | `logging.ERROR` | Red `#FF6B6B` |
 | `logging.CRITICAL` | Bold Red `#FF0000` |
+
+### 6.6 Printing the return value
+
+`print_result` appends a successful run's return value to its own console: a blank line, a `========== Result ==========` rule, and the value. Off by default.
+
+**Two layers, three states.** `gui_main(print_result=)` is the application's answer and is a plain `bool`. `@tool(print_result=)` is `bool | None`, and `None` — the state a tool gets by not writing it — means "follow the application", not "off". `ToolPage` resolves the pair once, at construction:
+
+```python
+tool.print_result if tool.print_result is not None else app_print_result
+```
+
+The registry stores all three states and validates none of them: every value is legal, so there is no wrong one to report.
+
+**No Settings entry, deliberately.** Theme, language and font are application *defaults* that the user's choice overrides, because they describe how the application looks to whoever is sitting in front of it. This one says whether a tool's output is complete without its return value — a question only the author of the tools can answer — so it stays where the author writes it.
+
+**The lines are stdout, not a level of their own.** No new log level, no new theme token. The consequence is accepted: a printed return value is indistinguishable from a value the tool printed itself. What it buys is that the lines are stored with the run, reopen from history, and answer the log window's filter and search with no special case anywhere.
+
+**Silence over invention.** A failed run, a cancelled run and a run returning `None` print nothing — not even the rule, which would assert that a value exists. The text comes from `render_result()`, shared with `result_json` and Copy Result, so the same run cannot read two ways.
 
 ---
 
@@ -577,7 +620,7 @@ Filter: [All Tools ▼]  [All Status ▼]  [All time ▼]   [🔄 Refresh]
 | Feature | Detail |
 |---|---|
 | Close | Returns to the open tool tabs, or to the welcome page when none are open. The page fills the content area, so without this an application that went straight to History had no route back. |
-| Tool filter | Dropdown shows `"ToolSet Label: Tool Label"` entries, sorted alphabetically. Sized from a fixed character count, not from its longest entry -- tool labels come from the application, and a combo sized to them hands its author control over the window's minimum width. |
+| Tool filter | Dropdown shows `"ToolSet Label: Tool Label"` entries, sorted alphabetically — deliberately, and regardless of `gui_main(order=…)`: this is a lookup control, and a user scanning it for a name is better served by the alphabet than by the sidebar's shape. Sized from a fixed character count, not from its longest entry -- tool labels come from the application, and a combo sized to them hands its author control over the window's minimum width. |
 | Status filter | success / error / running / cancelled |
 | Time filter | Today / Last 7 days / Last 30 days / All time |
 | Keyboard nav | Arrow keys change row and update the detail panel. |
