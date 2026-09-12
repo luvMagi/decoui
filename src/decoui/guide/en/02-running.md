@@ -19,3 +19,15 @@ while the external program keeps going.
 
 The progress bar sweeps back and forth when a tool has not said how much work
 there is, and shows a real percentage when it has.
+
+Once a run has finished, three things can be done with what it returned:
+
+* ``Copy Result`` puts the value on the clipboard.
+* ``Send Result`` fills another tool's field with it, opening that tool and
+  bringing it to the front. It appears only when some other tool declares that
+  it accepts this kind of value, and it overwrites whatever was in the field.
+* The application may also have asked for the value to be printed to the
+  output console -- see the next page.
+
+Both buttons show the value in their tooltip, and both stay disabled until a
+run returns something.
