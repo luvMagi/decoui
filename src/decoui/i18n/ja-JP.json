@@ -29,6 +29,11 @@
   "tool.replay": "再実行",
   "tool.output": "出力",
   "tool.copy": "コピー",
+  "tool.copy_result": "戻り値をコピー",
+  "tool.send_result": "戻り値を送る",
+  "tool.result_none": "この実行に戻り値はありません。",
+  "tool.result_banner": "結果",
+  "tool.send_result_tooltip": "この戻り値を別のツールの入力欄に送ります",
   "tool.view_log": "ログを表示",
   "tool.running": "実行中…",
   "tool.done": "完了 ({elapsed}s)",
@@ -123,6 +128,9 @@
 
   "tool_i18n.problem_source": "翻訳",
   "tool_i18n.problem_summary": "ツールの翻訳ファイルを読み込めなかったため、未翻訳のテキストを使用します",
+  "field_routing.problem_source": "フィールド連携",
+  "field_routing.problem_summary": "ツールがフィールド {field_id} を返していますが、受け取る側がありません",
+
   "theme.problem_source": "テーマ",
   "theme.problem_summary": "テーマの読み込みに失敗したため、ライトテーマを使用しています"
 }

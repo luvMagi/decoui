@@ -37,6 +37,37 @@ from ..storage.models import ExecutionLog, ExecutionParam, ExecutionRecord
 from .worker import ToolWorker
 
 
+def render_result(result: Any) -> str | None:
+    """Render a tool's return value as the one text decoui shows for it.
+
+    There is deliberately only one of these. The same run's value reaches the
+    user in more than one place -- the history record, the Copy Result button,
+    and the console line ``print_result`` adds -- and two renderers would let
+    the same run read differently depending on where it was looked at.
+
+    Lossy and never failing, in that order: this is a display of the value, not
+    a serialisation of it. ``result_json`` is not round-trippable and is not
+    meant to be.
+
+    Args:
+        result: Whatever the tool returned.
+
+    Returns:
+        The rendered text, or None when the tool returned None -- which every
+        caller reads as "there is nothing to show", rather than showing the
+        word None.
+    """
+    if result is None:
+        return None
+    try:
+        return json.dumps(result, default=str, ensure_ascii=False)
+    except Exception:
+        # default=str already catches most of it; what is left is a container
+        # that raises while being walked. str() of the whole thing still says
+        # something true, and refusing to display a finished run would be worse.
+        return json.dumps(str(result), ensure_ascii=False)
+
+
 class ExecutionEngine(QObject):
     """Owns one tool's execution: history record, worker, cancellation.
 
@@ -203,12 +234,7 @@ class ExecutionEngine(QObject):
         # already ended, could fire the cancel hook.
         self._timeout_timer.stop()
         self._worker = None
-        result_json = None
-        if result is not None:
-            try:
-                result_json = json.dumps(result, default=str, ensure_ascii=False)
-            except Exception:
-                result_json = json.dumps(str(result), ensure_ascii=False)
+        result_json = render_result(result)
         update_record(
             self._record_id,
             status=status,

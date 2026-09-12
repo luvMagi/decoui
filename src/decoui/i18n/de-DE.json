@@ -29,6 +29,11 @@
   "tool.replay": "Wiederholen",
   "tool.output": "Ausgabe",
   "tool.copy": "Kopieren",
+  "tool.copy_result": "Ergebnis kopieren",
+  "tool.send_result": "Ergebnis senden",
+  "tool.result_none": "Dieser Lauf hat nichts zurückgegeben.",
+  "tool.result_banner": "Ergebnis",
+  "tool.send_result_tooltip": "Dieses Ergebnis in das Feld eines anderen Werkzeugs senden",
   "tool.view_log": "Protokoll anzeigen",
   "tool.running": "Wird ausgeführt…",
   "tool.done": "Fertig ({elapsed}s)",
@@ -123,6 +128,9 @@
 
   "tool_i18n.problem_source": "Übersetzungen",
   "tool_i18n.problem_summary": "Eine Übersetzungsdatei für ein Werkzeug konnte nicht gelesen werden; der nicht übersetzte Text wird verwendet",
+  "field_routing.problem_source": "Feldweiterleitung",
+  "field_routing.problem_summary": "ein Werkzeug erzeugt Feld {field_id}, aber nichts nimmt es entgegen",
+
   "theme.problem_source": "Designs",
   "theme.problem_summary": "Design konnte nicht geladen werden; Fallback auf das helle Design"
 }

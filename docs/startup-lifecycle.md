@@ -199,7 +199,7 @@ both are reported in the same dialog as hook failures at step 13.
 
 ## 6. Gotchas worth knowing
 
-- **Order between toolsets is alphabetical**, because `build_tree()` sorts by label. Do not depend on it. If toolset A needs something toolset B produced, that something belongs in the application hook.
+- **Construction order between toolsets follows the sidebar**, which is declaration order by default and alphabetical under `gui_main(order="label")`. Do not depend on it either way. If toolset A needs something toolset B produced, that something belongs in the application hook.
 - **The hooks are a `gui_main()` guarantee.** Constructing `MainWindow(tree)` directly — as the tests do — falls back to lazy instantiation, and `on_startup()` methods are never called.
 - **A `@tool` named `on_startup` stays a tool.** decoui checks for the tool marker first, so it is never called as a hook.
 - **Logging needs a level.** decoui attaches its console handler to the root

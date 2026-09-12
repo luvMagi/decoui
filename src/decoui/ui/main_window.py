@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..assets import icon_path
-from ..registry import ToolInfo, ToolSetInfo
+from ..registry import ToolInfo, ToolSetInfo, field_index
 from .history_page import HistoryPage
 from .nav_tree import NavTree
 from ..i18n import t
@@ -58,6 +58,7 @@ class MainWindow(QMainWindow):
         tree: list[ToolSetInfo],
         title: str = "decoui",
         instances: dict[type, object] | None = None,
+        print_result: bool = False,
     ) -> None:
         """Build the main application window.
 
@@ -66,6 +67,9 @@ class MainWindow(QMainWindow):
             title: Application-specific suffix for the window title.
             instances: Toolset instances created during startup. Classes absent
                 from the map are instantiated on first use.
+            print_result: The application's default for printing a successful
+                run's return value to the console. Carried, not acted on: each
+                page resolves it against its own ``@tool(print_result=...)``.
         """
         super().__init__()
         self.setWindowTitle(t("app.window_title", title=title))
@@ -78,6 +82,7 @@ class MainWindow(QMainWindow):
         self._tool_pages: dict[str, ToolPage] = {}
         self._instances: dict[type, object] = dict(instances or {})
         self._help_window: QWidget | None = None
+        self._print_result = print_result
 
         # Collect all tags
         all_tags: list[str] = sorted({
@@ -95,6 +100,11 @@ class MainWindow(QMainWindow):
             }.items(),
             key=lambda kv: kv[1],
         ))
+        # Kept for the Send Result menus, which name their destinations the same
+        # way the history filter does. Computed once: the index cannot change
+        # while the application runs, since it comes from the annotations.
+        self._tool_labels = tool_labels
+        self._field_index = field_index(tree)
 
         # Central widget
         central = QWidget(self)
@@ -231,6 +241,53 @@ class MainWindow(QMainWindow):
             self._instances[cls] = cls()
         return self._instances[cls]
 
+    def _send_targets_for(self, tool_info: ToolInfo) -> list[tuple[str, str, str]]:
+        """Work out where one tool's return value may be sent.
+
+        Args:
+            tool_info: The producing tool.
+
+        Returns:
+            ``(target_tool_id, "ToolSet: Tool", param_name)`` for every
+            parameter declaring the same field id, excluding the producer's own
+            parameters -- sending a value back into the tool that made it is not
+            a transfer, and offering it would only clutter the menu.
+        """
+        field_id = tool_info.return_field_id
+        if not field_id:
+            return []
+
+        targets: list[tuple[str, str, str]] = []
+        for tool_id, param_name in self._field_index.get(field_id, ()):
+            if tool_id == tool_info.tool_id:
+                continue
+            targets.append((tool_id, self._tool_labels[tool_id], param_name))
+        return targets
+
+    def _send_result(self, tool_id: str, param_name: str, value: object) -> None:
+        """Route a finished run's value into another tool's field.
+
+        Opens the destination and brings it to the front, the same way Replay
+        does -- a transfer the user cannot see land is hard to trust. Any value
+        already in the field is overwritten without asking: Send is an explicit
+        act, and a confirmation dialog belongs to destructive operations.
+
+        Args:
+            tool_id: The destination tool.
+            param_name: The field to write.
+            value: The producing tool's return value, as the object itself.
+        """
+        target = next(
+            (t for ts in self._tree for t in ts.tools if t.tool_id == tool_id),
+            None,
+        )
+        if target is None:
+            return
+        self._show_tool(target)
+        page = self._tool_pages.get(tool_id)
+        if page:
+            page.set_param(param_name, value)
+
     def _show_tool(self, tool_info: ToolInfo) -> None:
         """Open or activate a tool in the tabbed work area."""
         tid = tool_info.tool_id
@@ -241,8 +298,13 @@ class MainWindow(QMainWindow):
                 if any(t.tool_id == tid for t in ts.tools)
             )
             instance = self._get_instance(cls)
-            page = ToolPage(tool_info, instance, self._tabs)
+            page = ToolPage(
+                tool_info, instance, self._tabs,
+                send_targets=self._send_targets_for(tool_info),
+                app_print_result=self._print_result,
+            )
             page.history_requested.connect(self._show_history_for_tool)
+            page.send_requested.connect(self._send_result)
             self._tool_pages[tid] = page
         page = self._tool_pages[tid]
         tab_index = self._tabs.indexOf(page)

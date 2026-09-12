@@ -87,16 +87,37 @@ def test_explicit_toolsets_reject_an_undecorated_class() -> None:
     assert "NotAToolSet" in str(excinfo.value)
 
 
-def test_explicit_order_does_not_reach_the_tree() -> None:
-    """Verify build_tree still sorts by label, whatever order was passed.
+def test_explicit_order_reaches_the_tree() -> None:
+    """Verify the order an explicit list was written in is the sidebar's.
 
-    Documented in gui_main(): an explicit list controls what loads, not the
-    order the navigation tree shows.
+    Documented in gui_main(): the list controls what loads *and* the order it
+    appears in. Both names here sort the other way round, so a tree that came
+    back alphabetical would be indistinguishable from one that ignored the list.
     """
     ordered = _check_explicit_toolsets([OtherTools, LoadedTools])
     tree = build_tree(*ordered)
 
+    assert [ts.label for ts in tree] == ["Other Tools", "Loaded Tools"]
+
+
+def test_order_label_sorts_toolsets_alphabetically() -> None:
+    """Verify order="label" restores the pre-1.1.0 alphabetical sidebar."""
+    tree = build_tree(OtherTools, LoadedTools, order="label")
+
     assert [ts.label for ts in tree] == ["Loaded Tools", "Other Tools"]
+
+
+def test_a_misspelled_order_is_refused() -> None:
+    """Verify an unrecognised order names itself and the values that exist.
+
+    gui_main() validates before it builds a QApplication, so this message is
+    what a typo in an entry point produces.
+    """
+    with pytest.raises(ValueError) as excinfo:
+        build_tree(LoadedTools, order="alphabetical")
+
+    assert "alphabetical" in str(excinfo.value)
+    assert "declaration" in str(excinfo.value)
 
 
 def test_startup_hook_runs_once() -> None:

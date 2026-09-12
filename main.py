@@ -31,8 +31,8 @@ if __name__ == "__main__":
     gui_main(
         title="decoui Examples",
         db_path="history.db",
-        # The list decides *what* loads, not the order it appears in: the
-        # sidebar is always sorted by label.
+        # The list decides what loads *and*, by default, the order the sidebar
+        # lists it in. gui_main(order="label") sorts alphabetically instead.
         toolsets=TOOLSETS,
         # The examples' own labels and field text, translated.
         # Switch the interface to Japanese in Settings to see it.

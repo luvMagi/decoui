@@ -2,6 +2,8 @@
 
 Semua yang dicetak (print) atau dicatat dalam log oleh alat akan muncul secara langsung pada konsol keluaran di bawah formulir saat alat berjalan. Tingkat log diberi kode warna, dan keluaran ``print`` standar ditampilkan dengan warnanya sendiri agar tetap mudah dibedakan dari catatan log.
 
+Jika aplikasi mengaktifkannya, nilai kembalian dari eksekusi yang berhasil dicetak di akhir keluaran: satu baris kosong, garis ``========== Hasil ==========``, lalu nilainya. Tidak ada yang dicetak ketika eksekusi gagal, dibatalkan, atau tidak mengembalikan apa pun.
+
 * ``Salin`` (``Copy``): menyalin seluruh isi konsol ke papan klip.
 * ``Lihat Log`` (``View Log``): membuka keluaran eksekusi kali ini dalam jendela terpisah yang ukurannya dapat disesuaikan.
 

@@ -29,6 +29,11 @@
   "tool.replay": "Rejouer",
   "tool.output": "Sortie",
   "tool.copy": "Copier",
+  "tool.copy_result": "Copier le résultat",
+  "tool.send_result": "Envoyer le résultat",
+  "tool.result_none": "Cette exécution n’a rien renvoyé.",
+  "tool.result_banner": "Résultat",
+  "tool.send_result_tooltip": "Envoyer ce résultat dans le champ d’un autre outil",
   "tool.view_log": "Voir le journal",
   "tool.running": "Exécution en cours…",
   "tool.done": "Terminé ({elapsed}s)",
@@ -123,6 +128,9 @@
 
   "tool_i18n.problem_source": "Traductions",
   "tool_i18n.problem_summary": "Impossible de lire un fichier de traduction d’outil ; le texte non traduit est utilisé",
+  "field_routing.problem_source": "Routage des champs",
+  "field_routing.problem_summary": "un outil produit le champ {field_id}, mais rien ne l’accepte",
+
   "theme.problem_source": "Thèmes",
   "theme.problem_summary": "Échec du chargement du thème ; retour au thème clair"
 }
