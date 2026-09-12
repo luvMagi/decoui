@@ -8,7 +8,7 @@
   <p>
     <a href="https://pypi.org/project/decoui/"><img src="https://img.shields.io/pypi/v/decoui?label=PyPI&color=3775A9" alt="PyPI version"></a>
     <img src="https://img.shields.io/pypi/pyversions/decoui?label=Python" alt="Supported Python versions">
-    <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT license"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="Apache 2.0 license"></a>
   </p>
 </div>
 
@@ -127,4 +127,4 @@ Data processors, operations utilities, batch-job launchers, internal productivit
 
 ## License
 
-[MIT](LICENSE)
+[Apache-2.0](LICENSE)
