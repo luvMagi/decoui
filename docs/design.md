@@ -149,12 +149,13 @@ def merge(self, files: list, output: str = "out.csv") -> str:
 | `confirm` | `bool` | `False` | Show Yes/No dialog before executing. |
 | `timeout` | `int\|None` | `None` | Execution timeout in seconds. |
 | `on_cancel` | `callable\|str` | `None` | Cleanup run on the GUI thread when the tool is cancelled. See [6.2](#62-cancellation). |
+| `print_result` | `bool\|None` | `None` | Print the return value to the console when the run succeeds. `None` follows the application. See [6.6](#66-printing-the-return-value). |
 
 Keys in `placeholders`, `labels`, `completions`, `cascade` and `defaults` are validated against the
 method signature in `build_tree()`, not in the decorator — a tool called directly, without a GUI,
 must not be blocked by form-text validation.
 
-**Return values** from tool methods are intentionally ignored by the GUI. Use `print()` or `logging` for any output.
+**Return values** are never rendered into the page as a widget of their own. They reach the user by four routes instead: the history record, Copy Result, Send Result (see [5.4](#54-toolpage)), and — under `print_result` — one more console line (see [6.6](#66-printing-the-return-value)). Anything the user must see *while* a tool runs still goes through `print()` or `logging`.
 
 ---
 
@@ -323,6 +324,22 @@ menu bar.
 | **Send Result** | Emit `send_requested(tool_id, param, value)` → MainWindow routes the live object into a field declaring the same `F(id=...)`. Not built at all when no field does. |
 | **Copy** | Copy console text to clipboard. |
 | **View Log** | Open current log records in a `LogWindow` (same as History's View Full Log). |
+
+**Result routing** (`F(id=...)`):
+
+`registry.field_index()` walks the tree once and returns `{field_id: [(tool_id, param_name), …]}` — the whole routing table. `MainWindow` holds it, works out each page's destinations before constructing it, and does the routing itself: a page knows what it produced, not how to reach another page. The same division as Replay.
+
+Three declarations are rejected rather than half-honoured:
+
+| Declaration | Outcome |
+|---|---|
+| One id at two different types | `ValueError` in `build_tree()`, naming both ends |
+| `F(id=)` nested inside a return annotation | `ValueError` — a return value is sent whole, so a member's id could not be honoured |
+| An id produced but never accepted | `StartupProblem`, non-fatal — `unconsumed_field_ids()` |
+
+The match is annotation-to-annotation. decoui never inspects the object a run returned, so a tool whose signature lies passes an unexpected type to the destination field; that is the tool's own bargain.
+
+`set_param()` writes the live object and then calls `notify_commit()` explicitly, so the destination's `cascade` fires exactly as it would for a typed value. Without that call, "Send does not suspend cascade" would have been a decision with no code behind it.
 
 **Status badge** (pill label, top-right of header):
 

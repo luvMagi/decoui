@@ -20,6 +20,7 @@ guides are linked from the relevant sections below.
 - **Parallel tool tabs** — keep multiple tool pages open and switch between running tasks
 - **Persistent layout** — sidebar width is restored from the application database
 - **Replay** — restore any past run's parameters with one click
+- **Result routing** — `F(id=...)` names a field, and one tool's return value fills another tool's form
 - **Settings store** — `store("ns")[key] = value`, namespaced and persisted in the same database
 - **Help panel** — a reference built from the docstrings the tools already carry, with cross-references, tabs and back/forward
 - **Themes** — four built in, any number as JSON files; changed from Settings without a restart
@@ -349,6 +350,12 @@ Adding `F` to an annotation is purely additive: widget selection, required-field
 marking and value conversion all read the bare type underneath, so existing code
 keeps working unchanged.
 
+| Argument | Effect |
+|---|---|
+| `label` | Form label for any parameter annotated with this type. |
+| `placeholder` | Placeholder text for the same. |
+| `id` | Names the field, so a value can travel between the tools that declare it. See [Carrying a result into another tool](#carrying-a-result-into-another-tool). |
+
 > **Note** — with `from __future__ import annotations`, annotations are strings at
 > runtime and decoui resolves them with `typing.get_type_hints()`. An alias like
 > `DumpFile` must therefore be importable at runtime; putting the import under
@@ -459,6 +466,56 @@ Tool methods can use `print()` and the standard `logging` module. Both are captu
 
 A return value is never rendered into the page as the tool works. Anything the user has to see *while* it runs goes through `print()`, `logging` or [`progress()`](#progress). What happens to the value once the run ends is below.
 
+### Carrying a result into another tool
+
+Half of what people do with a finished run is feed it to the next tool. `F(id=...)` is how the two ends say they mean the same field:
+
+```python
+from typing import Annotated
+from decoui import F, gui_main, tool, toolset
+
+ArtifactId = Annotated[str, F(id="artifact", label="Artifact id")]
+
+@toolset(label="Build")
+class BuildTools:
+
+    @tool(label="Build")
+    def build(self, ref: str = "main") -> ArtifactId:
+        return f"build-{ref}-4711"
+
+@toolset(label="Deploy")
+class DeployTools:
+
+    @tool(label="Deploy")
+    def deploy(self, artifact: ArtifactId, env: str = "staging") -> None:
+        ...
+```
+
+Build's page now has a **Send Result** button that drops the finished value into Deploy's `artifact` field. Nothing else changes: the id does not alter the widget, the form, or the value.
+
+The id may be written on a return annotation, on a parameter, or — as above — once on a shared alias used by both. On a return it means *this tool produces the field*; on a parameter, *this tool accepts it*.
+
+**What the buttons do**
+
+| Button | Behaviour |
+|---|---|
+| **Copy Result** | Puts the rendered value on the clipboard. Always present; disabled until a run returns something other than `None`. |
+| **Send Result** | Writes the value into a field that declared the same id. Built only when such a field exists somewhere — one target makes it a plain button, several make it a menu of `ToolSet: Tool → field`. |
+
+Both preview the value in their tooltip, since a button acting on something invisible is worth explaining.
+
+Send hands over the **live object**, not its text, which is why the two ends are matched by type rather than by name. It opens the destination tab and brings it to the front, overwrites whatever was in the field without asking, and fires that field's [`cascade`](#cascade--fill-other-fields) as if it had been typed. A tool never appears as a destination for its own result.
+
+**Three mistakes it refuses to make**
+
+| Mistake | What happens |
+|---|---|
+| The same id declared at two different types | `ValueError` at startup, naming both ends. One id means one field, so both ends must agree. |
+| `F(id=...)` *inside* a return annotation — a member of a tuple or dataclass | `ValueError` at startup. A return value is sent whole; decoui does not route the members of one separately. |
+| An id some tool produces but no parameter accepts | Reported in the startup problem dialog, not fatal. Almost always a typo, and the symptom otherwise is a missing button with nothing to explain it. |
+
+The check is between **annotations**, not between an annotation and the object a run actually returned. A tool annotated `-> ArtifactId` that returns a `dict` will hand that `dict` to a field built for a string; decoui believes what the signature says.
+
 ### Printing the return value
 
 Off by default: a finished run records its return value in the history and offers it to **Copy Result** and **Send Result**, but the console says nothing about it. Turn it on and decoui appends the value to the console instead of every tool ending with `print(result)`:
@@ -536,7 +593,7 @@ Outside a running tool — when you instantiate the toolset and call the method 
 | **Reset** | Expand the parameter panel and clear the output console. Parameters are kept. |
 | **Stop** | Request cancellation of the running task. |
 | **Replay** | Open the History panel pre-filtered to this tool's past runs. |
-| **Copy Result** | Copy the last run's return value to the clipboard. Disabled until a run returns something. |
+| **Copy Result** | Copy the last run's return value to the clipboard. Disabled until a run returns something. See [Carrying a result into another tool](#carrying-a-result-into-another-tool). |
 | **Send Result** | Hand the last run's return value to another tool's field, matched by `F(id=...)`. Built only when some field declares the same id. |
 | **Copy** | Copy current console output to clipboard. |
 | **View Log** | Open the current console output in a resizable log viewer window. |

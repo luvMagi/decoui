@@ -12,3 +12,16 @@ Algunas herramientas solicitan confirmación antes de iniciarse; esto lo declara
 ``Detener`` interrumpe una herramienta en ejecución. Una herramienta que solo esté calculando o en reposo (sleep) se detiene de inmediato. Aquella que esté esperando a un programa externo solo se detendrá si su autor implementó la limpieza para ese caso; de lo contrario, la página vuelve al estado inactivo mientras el programa externo continúa ejecutándose.
 
 La barra de progreso oscila de un lado a otro cuando una herramienta no ha especificado la cantidad total de trabajo, y muestra un porcentaje real cuando sí lo ha hecho.
+
+Cuando una ejecución termina, hay tres cosas que se pueden hacer con lo que
+devolvió:
+
+* ``Copiar resultado`` pone el valor en el portapapeles.
+* ``Enviar resultado`` rellena con él el campo de otra herramienta, abriéndola
+  y trayéndola al frente. Solo aparece cuando otra herramienta declara que
+  acepta un valor de ese tipo, y sobrescribe lo que hubiera en el campo.
+* La aplicación también puede haber pedido que el valor se imprima en la
+  consola de salida -- véase la página siguiente.
+
+Ambos botones muestran el valor en su tooltip y siguen deshabilitados hasta que
+una ejecución devuelve algo.

@@ -12,3 +12,15 @@ Bazı araçlar başlamadan önce onay ister; bu durum uygulamanın kararı deği
 ``Durdur`` çalışan bir aracı kesintiye uğratır. Yalnızca hesaplama yapan veya bekleme (sleep) durumundaki bir araç hemen durur. Harici bir programı bekleyen bir araç ise, yalnızca geliştiricisi bu durum için bir temizleme mantığı tanımlamışsa durur — aksi takdirde harici program çalışmaya devam ederken sayfa boşta (idle) durumuna döner.
 
 İlerleme çubuğu, bir araç toplam iş miktarını belirtmediğinde iki yana salınır; iş miktarı belirtildiğinde ise gerçek bir yüzde gösterir.
+
+Bir çalıştırma bittiğinde dönen değerle yapılabilecek üç şey vardır:
+
+* ``Sonucu kopyala`` değeri panoya koyar.
+* ``Sonucu gönder`` değeri başka bir aracın alanına yazar; o aracı açar ve öne
+  getirir. Yalnızca başka bir araç bu türden bir değeri kabul ettiğini
+  bildirmişse görünür ve alandaki mevcut içeriğin üzerine yazar.
+* Uygulama ayrıca değerin çıktı konsoluna yazdırılmasını istemiş olabilir --
+  bir sonraki sayfaya bakın.
+
+Her iki düğme de değeri ipucunda gösterir ve bir çalıştırma bir şey
+döndürene kadar devre dışı kalır.
